@@ -113,8 +113,14 @@ done
   exit 69
 }
 
+# Not `stat -f ... || stat -c ...`: on Linux, `stat -f` queries the filesystem and exits
+# 0, so the fallback never runs and the "mode" is garbage.
 file_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+  if [[ "$(uname -s)" == Darwin ]]; then
+    stat -f '%Lp' "$1"
+  else
+    stat -c '%a' "$1"
+  fi
 }
 
 require_protected_file() {
