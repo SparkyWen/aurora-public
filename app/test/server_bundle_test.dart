@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io' show gzip;
 
+import 'package:aurora/cli/cli_app.dart';
 import 'package:aurora/core/config_compiler.dart';
 import 'package:aurora/core/contract.dart';
 import 'package:aurora/core/contract_editor.dart';
@@ -348,6 +349,40 @@ void main() {
     test('one server has no family lock: automatic within that server', () {
       final contract = _contract(_plan(null, _link(_bundle())));
       expect(resolveRouteFamilySelection(null, contract), isNull);
+    });
+
+    // What a route resolves to is handed to the selector of the compiled config, and an
+    // unknown tag fails the connection after the tunnel is already up. With one server,
+    // which is everyone at first, the compiler emits no `via-*` group at all.
+    test('every route that can be chosen exists in the compiled config', () {
+      final one = _plan(null, _link(_bundle()));
+      final two = _plan(one, _link(_bundle(kind: 'home', name: 'house')));
+      final three = _plan(
+        two,
+        _link(_bundle(kind: 'relay', name: 'edge', exit: _homeExit)),
+      );
+      for (final contractJson in [one, two, three]) {
+        final contract = _contract(contractJson);
+        final compiled = ConfigCompiler.compile(
+          contract,
+          mode: AuroraMode.global,
+          platform: AuroraPlatform.linux,
+        );
+        final selector = (compiled['outbounds'] as List).cast<Map<String, dynamic>>().singleWhere(
+          (outbound) => outbound['tag'] == contract.outboundGroup.selectorTag,
+        );
+        final selectable = (selector['outbounds'] as List).cast<String>();
+
+        expect(selectable, contains(resolveDefaultRouteTarget(contract).groupTag));
+        for (final line in [null, auroraAutoRouteSelection, ...contract.routeFamilies]) {
+          final target = resolveCliRouteTarget(line, contract);
+          expect(target, isNotNull, reason: '--line $line');
+          expect(selectable, contains(target!.groupTag), reason: '--line $line');
+        }
+        for (final family in renderableRouteFamilies(contract)) {
+          expect(selectable, contains(routeFamilyGroupTag(family)));
+        }
+      }
     });
 
     test('adding a second exit does not move the public IP', () {

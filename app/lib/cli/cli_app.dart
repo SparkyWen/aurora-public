@@ -97,6 +97,15 @@ AuroraRouteTarget? resolveCliRouteTarget(String? line, AuroraContract contract) 
       isPreferred: true,
     );
   }
+  // Someone with one server may well name it. There is no group per family then, because
+  // `auto` is exactly that server, so naming it is not an error.
+  if (contract.routeFamilies.length == 1 && contract.routeFamilies.single == line) {
+    return AuroraRouteTarget(
+      groupTag: contract.outboundGroup.urltestTag,
+      label: routeFamilyLabel(line),
+      isPreferred: true,
+    );
+  }
   // Only families the compiled config really has a group for: selecting a tag that
   // does not exist can only fail.
   if (!renderableRouteFamilies(contract).contains(line)) return null;
@@ -297,8 +306,8 @@ class AuroraCliApp {
     if (target == null) {
       final available = contract.paths != null
           ? contract.paths!.items.keys.toList()
-          : renderableRouteFamilies(contract);
-      out('This contract has no route "${options.line}". Available: ${available.join(', ')}, auto');
+          : contract.routeFamilies;
+      out('This contract has no route "${options.line}". Available: ${[...available, auroraAutoRouteSelection].join(', ')}');
       return 2;
     }
 

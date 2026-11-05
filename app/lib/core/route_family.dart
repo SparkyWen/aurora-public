@@ -1,8 +1,9 @@
 /// Route families: how traffic reaches an exit.
 ///
-/// The compiler only emits a `via-<family>` urltest group for a family with at
-/// least one member left after filtering (see `_legacyOutbounds` in
-/// `config_compiler.dart`). `AuroraContract.routeFamilies` reflects what a contract
+/// The compiler only emits a `via-<family>` urltest group when there is more than one
+/// family, and only for a family with at least one member left after filtering (see
+/// `_legacyOutbounds` in `config_compiler.dart`). With one family, `auto` already is
+/// that family. `AuroraContract.routeFamilies` reflects what a contract
 /// declares, not what the compiled config contains, and the two can differ. The UI
 /// must render from the latter: otherwise the user can pick a group that does not
 /// exist and `selectOutbound` fails on an unknown tag.
@@ -22,9 +23,11 @@ const auroraRelayRouteFamily = 'relay';
 const auroraAutoRouteSelection = 'auto';
 
 /// Families the compiler really emits a group for, in the stable
-/// [AuroraContract.routeFamilies] order. A family qualifies when one of its members
-/// is in `outbound_group.urltest.members`, which is exactly the compiler's filter.
+/// [AuroraContract.routeFamilies] order. A family qualifies when there are at least two
+/// families and one of its members is in `outbound_group.urltest.members`, which is
+/// exactly the compiler's filter.
 List<String> renderableRouteFamilies(AuroraContract contract) {
+  if (contract.routeFamilies.length < 2) return const [];
   final urltestMembers = contract.outboundGroup.urltestMembers.toSet();
   final byFamily = contract.nodesByFamily;
   return contract.routeFamilies
