@@ -24,7 +24,9 @@ file "$TMP/default/aurora-relay-agent" | grep -Fq 'ELF 64-bit LSB executable, x8
 
 # Cross-compilation works in every direction a node can need.
 make -C "$ROOT/edge-agent" home GOOS=darwin GOARCH=arm64 DIST="$TMP/mac" >/dev/null
-file "$TMP/mac/aurora-home-agent" | grep -Fq 'Mach-O 64-bit executable arm64' ||
+# file(1) words this differently per platform: "Mach-O 64-bit executable arm64" on
+# macOS, "Mach-O 64-bit arm64 executable" on Linux.
+file "$TMP/mac/aurora-home-agent" | grep -Eq 'Mach-O 64-bit.*arm64' ||
   fail 'home agent did not honor GOOS=darwin GOARCH=arm64'
 make -C "$ROOT/edge-agent" home GOOS=linux GOARCH=amd64 DIST="$TMP/linux" >/dev/null
 file "$TMP/linux/aurora-home-agent" | grep -Fq 'ELF 64-bit LSB executable, x86-64' ||
