@@ -986,7 +986,12 @@ def main(argv):
         return 3
     control, kind = found
     if argv[0] == "external-ip":
-        print(external_ip(control, kind))
+        try:
+            print(external_ip(control, kind))
+        except Exception:
+            # Common router firmware (miniupnpd) answers with an error rather than name a
+            # private WAN address, so "there is a router and it will not say" means something.
+            print("unknown")
         return 0
     if argv[0] == "map":
         failed = 0
@@ -1039,6 +1044,12 @@ check_cgnat() {
   local wan
   wan="$(upnp_helper external-ip 2>/dev/null || true)"
   [[ -n "$wan" ]] || return 0
+  # A router that will neither name its address nor forward a port. Telling this user to
+  # forward ports by hand would send them after something that cannot work.
+  if [[ "$wan" == unknown ]]; then
+    if [[ "${UPNP_FAILED:-0}" == 1 ]]; then BEHIND_CGNAT=1; fi
+    return 0
+  fi
   if is_cgnat_ipv4 "$wan" || is_private_ipv4 "$wan" || [[ "$wan" != "$1" ]]; then
     BEHIND_CGNAT=1
   fi
