@@ -1,0 +1,44 @@
+# Cloudflare Worker configuration for the Aurora control plane.
+#
+# Deploy from this directory with `npx wrangler deploy`, after `npx wrangler login`
+# with your own Cloudflare account, or with CLOUDFLARE_API_TOKEN set.
+#
+# No secret belongs in this file:
+#   - the contract           -> KV (key=contract), uploaded by scripts/publish-contract.mjs
+#   - AURORA_TOKEN           -> Worker secret, set by the same script. Reads the contract
+#                               and the egress lease.
+#   - AURORA_LEASE_WRITE_TOKEN -> `npx wrangler secret put AURORA_LEASE_WRITE_TOKEN`. Only
+#                               the home agent writes leases with it. Optional: see
+#                               docs/advanced-signed-egress.md. Never reuse a Cloudflare
+#                               DNS API token here.
+name = "aurora-cp"
+main = "src/worker.js"
+compatibility_date = "2026-07-19"
+workers_dev = true
+
+[vars]
+# What /v2/get_domain returns: the delivery entries that are alive (a JSON string).
+# Your subdomain is the one in the URL `npx wrangler deploy` prints. Replace the value
+# below with that URL, add any custom or backup domains, and deploy again.
+DELIVERY_DOMAINS = "[\"https://aurora-cp.YOUR-SUBDOMAIN.workers.dev\"]"
+
+# Run `npx wrangler kv namespace create AURORA_KV` and paste the id it prints.
+[[kv_namespaces]]
+binding = "AURORA_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# Strongly consistent signed-lease register. KV remains contract delivery only;
+# lease compare-and-store must be serialized to reject concurrent replay.
+[[durable_objects.bindings]]
+name = "EGRESS_LEASE_STORE"
+class_name = "EgressLeaseStore"
+
+[exports.EgressLeaseStore]
+type = "durable-object"
+storage = "sqlite"
+
+# Optional: a custom domain. On some networks it is more stable than *.workers.dev, and
+# it can be replaced at any time if it gets blocked.
+# [[routes]]
+# pattern = "cp.example.com"
+# custom_domain = true

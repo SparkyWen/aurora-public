@@ -1,0 +1,163 @@
+# Compile-and-link check for a complete unsigned iOS Release build, including the
+# embedded PacketTunnel extension. It proves the project builds from a fresh clone;
+# it does not sign, install or exercise a VPN. No Apple account or secret is needed.
+
+name: ios-release-check
+
+on:
+  pull_request:
+    paths: ["app/**", "core/**", ".github/workflows/ios-release-check.yml"]
+  push:
+    branches: [main]
+    paths: ["app/**", "core/**", ".github/workflows/ios-release-check.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      # Limits concurrency of direct Go commands; gomobile subcommands may override GOFLAGS.
+      GOFLAGS: -p=2
+      COCOAPODS_DISABLE_STATS: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Record compiler inputs
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios-release-evidence"
+          echo "GEM_HOME=$RUNNER_TEMP/aurora-ios-gems" >> "$GITHUB_ENV"
+          echo "GEM_PATH=$RUNNER_TEMP/aurora-ios-gems" >> "$GITHUB_ENV"
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun swiftc --version
+          git rev-parse HEAD > "$RUNNER_TEMP/ios-release-evidence/source-sha.txt"
+
+      - uses: actions/setup-go@v5
+        id: go
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      # The cache key carries everything that changes the binary: gomobile version,
+      # runner OS/arch, Xcode, the Go toolchain and the content of core/. A hit skips
+      # the whole bind. Actions caches are isolated per ref, so a tag or PR run can
+      # only read what main saved; run this workflow on main once to warm it.
+      - name: Restore iOS device libbox
+        id: libbox
+        uses: actions/cache@v4
+        with:
+          path: app/ios/PacketTunnel/Libbox.xcframework
+          key: libbox-ios-arm64-gomobile-v0.1.12-v2-${{ runner.os }}-${{ runner.arch }}-xcode26.5-go${{ steps.go.outputs.go-version }}-${{ hashFiles('core/**') }}
+
+      - name: Build libbox from pinned source
+        if: steps.libbox.outputs.cache-hit != 'true'
+        working-directory: core
+        run: |
+          go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          gomobile init
+          # init installs gobind@latest internally; restore the pinned generator.
+          go install github.com/sagernet/gomobile/cmd/gobind@v0.1.12
+          # Verify what is actually on PATH is the pinned sagernet fork, not upstream
+          # x/mobile: `go version -m` prints the module path and version baked in.
+          for tool in gomobile gobind; do
+            tool_info="$(go version -m "$(command -v "$tool")")"
+            printf '%s\n' "$tool_info"
+            printf '%s\n' "$tool_info" | awk -v expected_path="github.com/sagernet/gomobile/cmd/$tool" '
+              $1 == "path" && $2 == expected_path { command_ok = 1 }
+              $1 == "mod" && $2 == "github.com/sagernet/gomobile" && $3 == "v0.1.12" { module_ok = 1 }
+              END { exit !(command_ok && module_ok) }'
+          done
+          # Same as the Makefile's iOS rule; CI links device arm64 only, no macOS slice.
+          gomobile bind -v -target=ios/arm64 -iosversion=15.0 \
+            -tags=with_gvisor,with_quic,with_utls,with_clash_api \
+            -trimpath -buildvcs=false \
+            -o ../app/ios/PacketTunnel/Libbox.xcframework \
+            github.com/sagernet/sing-box/experimental/libbox \
+            2>&1 | tee "$RUNNER_TEMP/ios-release-evidence/libbox-build.log"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      - name: Install CocoaPods
+        run: |
+          gem install cocoapods -v 1.16.2 --no-document
+          echo "$GEM_HOME/bin" >> "$GITHUB_PATH"
+
+      # Podfile.lock pins pod specs, and a stale local spec repo makes a plain
+      # `pod install` fail on a fresh runner when the lock has drifted. Refreshing
+      # the spec repo here lets a clean clone build; any lock change is reported
+      # in the log rather than failing the check.
+      - name: Resolve pods
+        working-directory: app
+        run: |
+          flutter pub get
+          cd ios
+          pod install --repo-update
+          git diff --stat -- Podfile.lock || true
+
+      - name: Build complete unsigned iOS Release
+        working-directory: app
+        run: |
+          pod --version
+          flutter --version
+          # No contract is embedded: the app ships empty and users import their own.
+          flutter build ios --release --no-codesign --no-pub \
+            --target=lib/main.dart \
+            2>&1 | tee "$RUNNER_TEMP/ios-release-evidence/ios-release-build.log"
+
+      - name: Verify linked Runner, AOT and embedded PacketTunnel
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, plistlib, re, subprocess
+          root = pathlib.Path.cwd()
+          app = root / 'app/build/ios/iphoneos/Runner.app'
+          extension = app / 'PlugIns/PacketTunnel.appex'
+          version = re.search(r'^version:\s*(\S+)\s*$', (root / 'app/pubspec.yaml').read_text(), re.M).group(1)
+          build_name, build_number = version.split('+')
+          for bundle, bundle_id in [(app, 'com.aurora.vpn'), (extension, 'com.aurora.vpn.PacketTunnel')]:
+              with (bundle / 'Info.plist').open('rb') as stream:
+                  info = plistlib.load(stream)
+              assert info['CFBundleIdentifier'] == bundle_id
+              assert info['CFBundleShortVersionString'] == build_name
+              assert info['CFBundleVersion'] == build_number
+          payload = {}
+          for relative in ['Runner', 'Frameworks/App.framework/App', 'PlugIns/PacketTunnel.appex/PacketTunnel']:
+              path = app / relative
+              assert path.is_file() and path.stat().st_size > 0, relative
+              subprocess.run(['xcrun', 'lipo', str(path), '-verify_arch', 'arm64'], check=True)
+              payload[relative] = {'bytes': path.stat().st_size, 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+          result = {
+              'scope': 'unsigned Release compile/link only; no signing, install or VPN verification',
+              'source': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'version': version,
+              'xcode': subprocess.check_output(['xcodebuild', '-version'], text=True).strip(),
+              'iphoneosSDK': subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-version'], text=True).strip(),
+              'payload': payload,
+          }
+          (pathlib.Path(os.environ['RUNNER_TEMP']) / 'ios-release-evidence/linked-payload.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+          # The build must not modify tracked sources (Podfile.lock is reported above).
+          git diff --exit-code -- . ':(exclude)app/ios/Podfile.lock'
+
+      - name: Preserve compile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-release-evidence
+          path: ${{ runner.temp }}/ios-release-evidence/
+          retention-days: 7

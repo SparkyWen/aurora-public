@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Aurora
+Comment=Aurora VPN
+Exec=/opt/aurora/aurora
+Icon=aurora
+Terminal=false
+Categories=Network;
+StartupWMClass=aurora

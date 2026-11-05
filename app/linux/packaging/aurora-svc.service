@@ -1,0 +1,18 @@
+[Unit]
+Description=Aurora VPN privileged helper
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/aurora/aurora-svc run
+Restart=on-failure
+RestartSec=5
+# Must be a machine-wide directory: the service runs as root and the GUI as the
+# logged-in user, so any per-user location resolves differently in the two.
+# Matches defaultStateBase().
+StateDirectory=aurora
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target

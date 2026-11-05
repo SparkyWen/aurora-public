@@ -1,0 +1,8 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"
+#include "Generated.xcconfig"
+
+// Aurora: the app links the static libbox archive (AuroraVPN's CommandClient).
+// Find the xcframework module + satisfy Go's libresolv (_res_9_*) at link time.
+// $(inherited) keeps the CocoaPods-provided flags intact.
+FRAMEWORK_SEARCH_PATHS = $(inherited) "$(PROJECT_DIR)/PacketTunnel"
+OTHER_LDFLAGS = $(inherited) -lresolv

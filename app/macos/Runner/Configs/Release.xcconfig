@@ -1,0 +1,8 @@
+#include "../../Flutter/Flutter-Release.xcconfig"
+#include "Warnings.xcconfig"
+
+// Aurora's personal macOS release is installed only on the current Apple
+// Silicon fleet. Keep production artifacts native-only so the large static
+// libbox archive is not duplicated for Intel in both Runner and PacketTunnel.
+ARCHS = arm64
+ONLY_ACTIVE_ARCH = YES

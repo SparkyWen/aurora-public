@@ -1,0 +1,170 @@
+{
+  "log": {"level": "info", "timestamp": true},
+  "dns": {
+    "servers": [
+      {"tag": "dns-proxy", "type": "https", "server": "1.1.1.1", "detour": "proxy"}
+    ],
+    "final": "dns-proxy",
+    "strategy": "ipv4_only",
+    "rules": [
+      {"query_type": ["AAAA"], "action": "predefined"},
+      {"domain_suffix": [".local", "localhost", "home.arpa", "internal", "intranet", "lan", "private", "corp", "home", "10.in-addr.arpa", "168.192.in-addr.arpa", "254.169.in-addr.arpa", "127.in-addr.arpa", "16.172.in-addr.arpa", "17.172.in-addr.arpa", "18.172.in-addr.arpa", "19.172.in-addr.arpa", "20.172.in-addr.arpa", "21.172.in-addr.arpa", "22.172.in-addr.arpa", "23.172.in-addr.arpa", "24.172.in-addr.arpa", "25.172.in-addr.arpa", "26.172.in-addr.arpa", "27.172.in-addr.arpa", "28.172.in-addr.arpa", "29.172.in-addr.arpa", "30.172.in-addr.arpa", "31.172.in-addr.arpa", "64.100.in-addr.arpa", "65.100.in-addr.arpa", "66.100.in-addr.arpa", "67.100.in-addr.arpa", "68.100.in-addr.arpa", "69.100.in-addr.arpa", "70.100.in-addr.arpa", "71.100.in-addr.arpa", "72.100.in-addr.arpa", "73.100.in-addr.arpa", "74.100.in-addr.arpa", "75.100.in-addr.arpa", "76.100.in-addr.arpa", "77.100.in-addr.arpa", "78.100.in-addr.arpa", "79.100.in-addr.arpa", "80.100.in-addr.arpa", "81.100.in-addr.arpa", "82.100.in-addr.arpa", "83.100.in-addr.arpa", "84.100.in-addr.arpa", "85.100.in-addr.arpa", "86.100.in-addr.arpa", "87.100.in-addr.arpa", "88.100.in-addr.arpa", "89.100.in-addr.arpa", "90.100.in-addr.arpa", "91.100.in-addr.arpa", "92.100.in-addr.arpa", "93.100.in-addr.arpa", "94.100.in-addr.arpa", "95.100.in-addr.arpa", "96.100.in-addr.arpa", "97.100.in-addr.arpa", "98.100.in-addr.arpa", "99.100.in-addr.arpa", "100.100.in-addr.arpa", "101.100.in-addr.arpa", "102.100.in-addr.arpa", "103.100.in-addr.arpa", "104.100.in-addr.arpa", "105.100.in-addr.arpa", "106.100.in-addr.arpa", "107.100.in-addr.arpa", "108.100.in-addr.arpa", "109.100.in-addr.arpa", "110.100.in-addr.arpa", "111.100.in-addr.arpa", "112.100.in-addr.arpa", "113.100.in-addr.arpa", "114.100.in-addr.arpa", "115.100.in-addr.arpa", "116.100.in-addr.arpa", "117.100.in-addr.arpa", "118.100.in-addr.arpa", "119.100.in-addr.arpa", "120.100.in-addr.arpa", "121.100.in-addr.arpa", "122.100.in-addr.arpa", "123.100.in-addr.arpa", "124.100.in-addr.arpa", "125.100.in-addr.arpa", "126.100.in-addr.arpa", "127.100.in-addr.arpa", "8.e.f.ip6.arpa", "9.e.f.ip6.arpa", "a.e.f.ip6.arpa", "b.e.f.ip6.arpa", "c.f.ip6.arpa", "d.f.ip6.arpa", "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa"], "domain_keyword": ["_dns-sd._udp"], "action": "predefined", "rcode": "NXDOMAIN"}
+    ]
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+      "mtu": 1400,
+      "auto_route": true,
+      "strict_route": true,
+      "stack": "gvisor"
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "proxy",
+      "outbounds": ["relay-auto", "home-auto", "fail-closed"],
+      "default": "fail-closed",
+      "interrupt_exist_connections": true
+    },
+    {
+      "type": "urltest",
+      "tag": "relay-auto",
+      "outbounds": ["home-via-relay-reality", "home-via-relay-hy2", "home-via-relay-ss"],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "60s",
+      "tolerance": 50
+    },
+    {
+      "type": "urltest",
+      "tag": "home-auto",
+      "outbounds": ["home-reality", "home-hy2", "home-ss"],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "60s",
+      "tolerance": 50
+    },
+    {
+      "type": "vless",
+      "tag": "relay-entry-reality",
+      "server": "198.51.100.8",
+      "server_port": 443,
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.microsoft.com",
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {"enabled": true, "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "short_id": "89abcdef"}
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "relay-entry-hy2",
+      "server": "198.51.100.8",
+      "server_port": 443,
+      "server_ports": [
+        "443:443"
+      ],
+      "hop_interval": "10s",
+      "password": "RELAY_HY2_PLACEHOLDER",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.bing.com",
+        "alpn": ["h3"],
+        "certificate_public_key_sha256": ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "relay-entry-ss",
+      "server": "198.51.100.8",
+      "server_port": 8443,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "udp_over_tcp": true
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "home-via-relay-reality",
+      "server": "100.64.0.26",
+      "server_port": 8388,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "udp_over_tcp": true,
+      "detour": "relay-entry-reality"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "home-via-relay-hy2",
+      "server": "100.64.0.26",
+      "server_port": 8388,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "udp_over_tcp": true,
+      "detour": "relay-entry-hy2"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "home-via-relay-ss",
+      "server": "100.64.0.26",
+      "server_port": 8388,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "udp_over_tcp": true,
+      "detour": "relay-entry-ss"
+    },
+    {
+      "type": "vless",
+      "tag": "home-reality",
+      "server": "203.0.113.10",
+      "server_port": 8443,
+      "uuid": "00000000-0000-0000-0000-000000000002",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.microsoft.com",
+        "utls": {"enabled": true, "fingerprint": "chrome"},
+        "reality": {"enabled": true, "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "short_id": "0123abcd"}
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "home-hy2",
+      "server": "203.0.113.10",
+      "server_port": 443,
+      "password": "HOME_HY2_PLACEHOLDER",
+      "tls": {
+        "enabled": true,
+        "server_name": "www.bing.com",
+        "alpn": ["h3"],
+        "certificate_public_key_sha256": ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "home-ss",
+      "server": "203.0.113.10",
+      "server_port": 2053,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "AAAAAAAAAAAAAAAAAAAAAA==",
+      "udp_over_tcp": true
+    },
+    {"type": "block", "tag": "fail-closed"},
+    {"type": "direct", "tag": "direct"}
+  ],
+  "route": {
+    "rules": [
+      {"ip_version": 6, "action": "reject", "method": "default", "no_drop": true},
+      {"action": "sniff"},
+      {"protocol": "dns", "action": "hijack-dns"},
+      {"ip_is_private": true, "outbound": "direct"}
+    ],
+    "default_domain_resolver": {"server": "dns-proxy"},
+    "final": "proxy",
+    "auto_detect_interface": true
+  },
+  "experimental": {"cache_file": {"enabled": false}}
+}

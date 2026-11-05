@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "updated": "2026-07-22T00:00:00Z",
+  "profile": {"name": "Aurora", "owner": "self", "default_mode": "global"},
+  "network": {"mtu": 1400, "ipv6_mode": "block", "suppress_https_rr": false},
+  "nodes": [
+    {
+      "id": "relay-entry-reality", "name": "relay REALITY entry", "role": "entry",
+      "protocol": "vless-reality", "server": "198.51.100.8", "port": 443,
+      "params": {"uuid": "00000000-0000-0000-0000-000000000001", "flow": "xtls-rprx-vision", "sni": "www.microsoft.com", "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "short_id": "89abcdef", "fingerprint": "chrome"}
+    },
+    {
+      "id": "relay-entry-hy2", "name": "relay Hysteria2 entry", "role": "entry",
+      "protocol": "hysteria2", "server": "198.51.100.8", "port": 443,
+      "params": {"password": "RELAY_HY2_PLACEHOLDER", "sni": "www.bing.com", "alpn": ["h3"], "certificate_public_key_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "server_ports": ["443:443"], "hop_interval": "10s"}
+    },
+    {
+      "id": "relay-entry-ss", "name": "relay SS2022 entry", "role": "entry",
+      "protocol": "shadowsocks-2022", "server": "198.51.100.8", "port": 8443,
+      "params": {"method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "multiplex": true}
+    },
+    {
+      "id": "home-via-relay-reality", "name": "Home via relay REALITY", "role": "exit",
+      "protocol": "shadowsocks-2022", "server": "100.64.0.26", "port": 8388, "detour": "relay-entry-reality",
+      "params": {"method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "multiplex": true}
+    },
+    {
+      "id": "home-via-relay-hy2", "name": "Home via relay Hysteria2", "role": "exit",
+      "protocol": "shadowsocks-2022", "server": "100.64.0.26", "port": 8388, "detour": "relay-entry-hy2",
+      "params": {"method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "multiplex": true}
+    },
+    {
+      "id": "home-via-relay-ss", "name": "Home via relay SS2022", "role": "exit",
+      "protocol": "shadowsocks-2022", "server": "100.64.0.26", "port": 8388, "detour": "relay-entry-ss",
+      "params": {"method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "multiplex": true}
+    },
+    {
+      "id": "home-reality", "name": "Home REALITY", "role": "primary",
+      "protocol": "vless-reality", "server": "203.0.113.10", "port": 8443,
+      "params": {"uuid": "00000000-0000-0000-0000-000000000002", "flow": "xtls-rprx-vision", "sni": "www.microsoft.com", "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "short_id": "0123abcd", "fingerprint": "chrome"}
+    },
+    {
+      "id": "home-hy2", "name": "Home Hysteria2", "role": "fast",
+      "protocol": "hysteria2", "server": "203.0.113.10", "port": 443,
+      "params": {"password": "HOME_HY2_PLACEHOLDER", "sni": "www.bing.com", "alpn": ["h3"], "certificate_public_key_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}
+    },
+    {
+      "id": "home-ss", "name": "Home SS2022", "role": "backup",
+      "protocol": "shadowsocks-2022", "server": "203.0.113.10", "port": 2053,
+      "params": {"method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "multiplex": true}
+    }
+  ],
+  "outbound_group": {
+    "selector": {"tag": "proxy", "members": ["auto", "home-reality", "home-hy2", "home-ss"], "default": "auto"},
+    "urltest": {"tag": "auto", "members": ["home-reality", "home-hy2", "home-ss"], "url": "https://www.gstatic.com/generate_204", "interval": "3m"}
+  },
+  "paths": {
+    "preferred": "relay",
+    "items": {
+      "relay": {"group_tag": "relay-auto", "members": ["home-via-relay-reality", "home-via-relay-hy2", "home-via-relay-ss"]},
+      "home": {"group_tag": "home-auto", "members": ["home-reality", "home-hy2", "home-ss"]}
+    }
+  },
+  "path_policy": {
+    "mode": "prefer_relay", "fallback": "home",
+    "health": {
+      "rolling_window": 5, "min_success_rate": 0.70, "hard_fail_rounds": 2,
+      "performance_fail_rounds": 3, "latency_ratio": 2.0, "latency_delta_ms": 250,
+      "recovery_success_rounds": 3, "recovery_stable_seconds": 120,
+      "flap_window_seconds": 600, "flap_limit": 2, "flap_cooldown_seconds": 900
+    }
+  },
+  "egress": {"expected_ipv4": "203.0.113.9", "expected_country": "US", "expected_asn": "AS64496"}
+}

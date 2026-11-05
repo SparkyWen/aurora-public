@@ -1,0 +1,49 @@
+# Template: runs the relay agent, which keeps the signed home IP in nftables.
+# Part of the manually wired option described in docs/advanced-signed-egress.md;
+# install.sh does not set this up.
+#
+# Install as /etc/systemd/system/aurora-relay-agent.service. It expects:
+#   - /usr/local/libexec/aurora-relay-agent, built with `make -C edge-agent relay`
+#   - /etc/aurora-relay/target-agent.json, root:aurora-relay, mode 0640
+#   - /etc/aurora-relay/base.nft, from base.nft.example in this directory
+#   - system accounts aurora-relay-agent and aurora-relay
+#
+# Adjust /usr/sbin/nft if your distribution keeps it elsewhere, and set the same path
+# as `nft_binary` in the agent's config.
+[Unit]
+Description=Aurora signed home exit target agent
+Wants=network-online.target
+After=network-online.target
+# The unit install.sh creates for sing-box. The entry must not start before the
+# firewall boundary and the signed hosts file exist.
+Before=aurora-node.service
+
+[Service]
+Type=simple
+User=aurora-relay-agent
+Group=aurora-relay
+RuntimeDirectory=aurora-relay
+RuntimeDirectoryMode=0750
+StateDirectory=aurora-relay
+StateDirectoryMode=0700
+ExecStartPre=/usr/sbin/nft -f /etc/aurora-relay/base.nft
+ExecStartPre=/usr/local/libexec/aurora-relay-agent sync --config /etc/aurora-relay/target-agent.json
+ExecStart=/usr/local/libexec/aurora-relay-agent run --config /etc/aurora-relay/target-agent.json
+Restart=on-failure
+RestartSec=3s
+# Enough to change the one nft set, and nothing else: the agent never runs as root.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+ReadWritePaths=/run/aurora-relay /var/lib/aurora-relay
+
+[Install]
+WantedBy=multi-user.target

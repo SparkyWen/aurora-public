@@ -1,0 +1,43 @@
+name: apple-native-check
+
+on:
+  pull_request:
+    paths:
+      - "app/macos/**"
+      - "app/ios/**"
+      - "tests/upstream-dns/**"
+      - "core/**"
+      - ".github/workflows/apple-native-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/macos/**"
+      - "app/ios/**"
+      - "tests/upstream-dns/**"
+      - "core/**"
+      - ".github/workflows/apple-native-check.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  apple-native:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - name: Apple command transport and tunnel lifecycle
+        run: |
+          bash app/macos/Runner/test/run.sh
+          bash app/macos/PacketTunnel/test/run.sh
+          bash app/ios/Runner/test/mobile/run.sh
+          bash app/ios/PacketTunnel/test/mobile/run.sh
+      - name: Verified DNS connections follow the selected path
+        run: bash tests/upstream-dns/run.sh

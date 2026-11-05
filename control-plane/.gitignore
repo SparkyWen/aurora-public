@@ -1,0 +1,6 @@
+node_modules/
+.wrangler/
+# Any local copy of a real contract: never commit these.
+*aurora-contract*.json
+*.local.*
+.dev.vars

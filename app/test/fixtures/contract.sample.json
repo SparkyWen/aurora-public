@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "updated": "2026-01-01T00:00:00Z",
+  "profile": { "name": "Aurora", "owner": "self", "default_mode": "smart" },
+  "network": { "mtu": 1400, "ipv6_mode": "block", "suppress_https_rr": false },
+  "nodes": [
+    {
+      "id": "vps-reality", "name": "VPS REALITY", "role": "primary",
+      "protocol": "vless-reality", "server": "203.0.113.10", "port": 443,
+      "params": { "uuid": "00000000-0000-0000-0000-000000000000", "flow": "xtls-rprx-vision",
+                  "sni": "www.microsoft.com", "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "short_id": "0123abcd", "fingerprint": "chrome" }
+    },
+    {
+      "id": "vps-hysteria2", "name": "VPS Hysteria2", "role": "fast",
+      "protocol": "hysteria2", "server": "203.0.113.10", "port": 443,
+      "params": { "password": "HY2_PLACEHOLDER", "sni": "www.bing.com", "alpn": ["h3"],
+                  "certificate_public_key_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" }
+    },
+    {
+      "id": "vps-ss2022", "name": "VPS SS2022", "role": "backup",
+      "protocol": "shadowsocks-2022", "server": "203.0.113.10", "port": 8443,
+      "params": { "method": "2022-blake3-aes-128-gcm", "password": "AAAAAAAAAAAAAAAAAAAAAA==", "multiplex": true }
+    }
+  ],
+  "outbound_group": {
+    "selector": { "tag": "proxy", "members": ["auto","vps-reality","vps-hysteria2","vps-ss2022"], "default": "auto" },
+    "urltest":  { "tag": "auto", "members": ["vps-reality","vps-hysteria2","vps-ss2022"], "url": "https://www.gstatic.com/generate_204", "interval": "3m" }
+  }
+}

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template: runs the home agent on a macOS home node. Part of the manually wired option
+  described in docs/advanced-signed-egress.md; install.sh does not set this up.
+
+  Install as /Library/LaunchDaemons/com.aurora.home-agent.plist, with:
+    /usr/local/libexec/aurora-home-agent     built with `make -C edge-agent home`
+    /usr/local/etc/aurora/home-agent.json    owner root, mode 0600
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.aurora.home-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/libexec/aurora-home-agent</string>
+    <string>run</string>
+    <string>--config</string>
+    <string>/usr/local/etc/aurora/home-agent.json</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/usr/local/var/log/aurora-home-agent.log</string>
+  <key>StandardErrorPath</key><string>/usr/local/var/log/aurora-home-agent.err</string>
+</dict>
+</plist>

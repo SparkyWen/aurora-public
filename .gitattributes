@@ -1,0 +1,4 @@
+# Shell scripts MUST stay LF even on Windows checkouts — bash treats a trailing
+# CRLF as part of the token (e.g. `set -o pipefail\r` → "invalid option name"),
+# which silently breaks scripts scp'd from a Windows working tree to the VPS.
+*.sh text eol=lf

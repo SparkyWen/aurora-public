@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "profile": {
+    "name": "Aurora",
+    "default_mode": "global",
+    "default_family": "edge"
+  },
+  "network": {
+    "mtu": 1400,
+    "ipv6_mode": "block",
+    "suppress_https_rr": false
+  },
+  "nodes": [
+    {
+      "protocol": "vless-reality",
+      "server": "203.0.113.10",
+      "port": 443,
+      "params": {
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "flow": "xtls-rprx-vision",
+        "sni": "www.example.com",
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "short_id": "0123abcd",
+        "fingerprint": "chrome"
+      },
+      "id": "tokyo-reality",
+      "name": "tokyo REALITY",
+      "role": "primary",
+      "via": "tokyo",
+      "group": "tokyo"
+    },
+    {
+      "protocol": "hysteria2",
+      "server": "203.0.113.10",
+      "port": 443,
+      "params": {
+        "password": "PLACEHOLDER-HY2-PASSWORD",
+        "sni": "www.example.org",
+        "alpn": [
+          "h3"
+        ],
+        "certificate_public_key_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "server_ports": [
+          "443:443"
+        ],
+        "hop_interval": "10s"
+      },
+      "id": "tokyo-hy2",
+      "name": "tokyo Hysteria2",
+      "role": "fast",
+      "via": "tokyo",
+      "group": "tokyo"
+    },
+    {
+      "protocol": "shadowsocks-2022",
+      "server": "203.0.113.10",
+      "port": 8443,
+      "params": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "AAAAAAAAAAAAAAAAAAAAAA=="
+      },
+      "id": "tokyo-ss",
+      "name": "tokyo Shadowsocks",
+      "role": "backup",
+      "via": "tokyo",
+      "group": "tokyo"
+    },
+    {
+      "protocol": "vless-ws-tls",
+      "server": "cdn.example.net",
+      "port": 2083,
+      "params": {
+        "uuid": "00000000-0000-4000-8000-000000000002",
+        "sni": "cdn.example.net",
+        "path": "/placeholder",
+        "fingerprint": "chrome"
+      },
+      "id": "tokyo-cdn",
+      "name": "tokyo CDN",
+      "role": "primary",
+      "via": "tokyo",
+      "group": "tokyo"
+    },
+    {
+      "protocol": "vless-reality",
+      "server": "home.example.net",
+      "port": 443,
+      "params": {
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "flow": "xtls-rprx-vision",
+        "sni": "www.example.com",
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "short_id": "0123abcd",
+        "fingerprint": "chrome"
+      },
+      "id": "house-reality",
+      "name": "house REALITY",
+      "role": "primary",
+      "via": "house",
+      "group": "house"
+    },
+    {
+      "protocol": "hysteria2",
+      "server": "home.example.net",
+      "port": 443,
+      "params": {
+        "password": "PLACEHOLDER-HY2-PASSWORD",
+        "sni": "www.example.org",
+        "alpn": [
+          "h3"
+        ],
+        "certificate_public_key_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "server_ports": [
+          "443:443"
+        ],
+        "hop_interval": "10s"
+      },
+      "id": "house-hy2",
+      "name": "house Hysteria2",
+      "role": "fast",
+      "via": "house",
+      "group": "house"
+    },
+    {
+      "protocol": "shadowsocks-2022",
+      "server": "home.example.net",
+      "port": 8443,
+      "params": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "AAAAAAAAAAAAAAAAAAAAAA=="
+      },
+      "id": "house-ss",
+      "name": "house Shadowsocks",
+      "role": "backup",
+      "via": "house",
+      "group": "house"
+    },
+    {
+      "protocol": "vless-reality",
+      "server": "198.51.100.8",
+      "port": 443,
+      "params": {
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "flow": "xtls-rprx-vision",
+        "sni": "www.example.com",
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "short_id": "0123abcd",
+        "fingerprint": "chrome"
+      },
+      "id": "edge-entry-reality",
+      "name": "edge entry REALITY",
+      "role": "entry",
+      "group": "edge"
+    },
+    {
+      "id": "house-via-edge-reality",
+      "name": "house via edge REALITY",
+      "role": "exit",
+      "via": "edge",
+      "group": "edge",
+      "protocol": "shadowsocks-2022",
+      "server": "home.example.net",
+      "port": 2053,
+      "detour": "edge-entry-reality",
+      "params": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "AAAAAAAAAAAAAAAAAAAAAA=="
+      }
+    },
+    {
+      "protocol": "hysteria2",
+      "server": "198.51.100.8",
+      "port": 443,
+      "params": {
+        "password": "PLACEHOLDER-HY2-PASSWORD",
+        "sni": "www.example.org",
+        "alpn": [
+          "h3"
+        ],
+        "certificate_public_key_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "server_ports": [
+          "443:443"
+        ],
+        "hop_interval": "10s"
+      },
+      "id": "edge-entry-hy2",
+      "name": "edge entry Hysteria2",
+      "role": "entry",
+      "group": "edge"
+    },
+    {
+      "id": "house-via-edge-hy2",
+      "name": "house via edge Hysteria2",
+      "role": "exit",
+      "via": "edge",
+      "group": "edge",
+      "protocol": "shadowsocks-2022",
+      "server": "home.example.net",
+      "port": 2053,
+      "detour": "edge-entry-hy2",
+      "params": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "AAAAAAAAAAAAAAAAAAAAAA=="
+      }
+    },
+    {
+      "protocol": "shadowsocks-2022",
+      "server": "198.51.100.8",
+      "port": 8443,
+      "params": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "AAAAAAAAAAAAAAAAAAAAAA=="
+      },
+      "id": "edge-entry-ss",
+      "name": "edge entry Shadowsocks",
+      "role": "entry",
+      "group": "edge"
+    },
+    {
+      "id": "house-via-edge-ss",
+      "name": "house via edge Shadowsocks",
+      "role": "exit",
+      "via": "edge",
+      "group": "edge",
+      "protocol": "shadowsocks-2022",
+      "server": "home.example.net",
+      "port": 2053,
+      "detour": "edge-entry-ss",
+      "params": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "AAAAAAAAAAAAAAAAAAAAAA=="
+      }
+    }
+  ],
+  "outbound_group": {
+    "selector": {
+      "tag": "proxy",
+      "members": [
+        "auto",
+        "tokyo-reality",
+        "tokyo-hy2",
+        "tokyo-ss",
+        "tokyo-cdn",
+        "house-reality",
+        "house-hy2",
+        "house-ss",
+        "house-via-edge-reality",
+        "house-via-edge-hy2",
+        "house-via-edge-ss"
+      ],
+      "default": "auto"
+    },
+    "urltest": {
+      "tag": "auto",
+      "members": [
+        "tokyo-reality",
+        "tokyo-hy2",
+        "tokyo-ss",
+        "tokyo-cdn",
+        "house-reality",
+        "house-hy2",
+        "house-ss",
+        "house-via-edge-reality",
+        "house-via-edge-hy2",
+        "house-via-edge-ss"
+      ],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "3m"
+    }
+  },
+  "revision": 1793879616404,
+  "updated": "2026-11-05T11:53:36.404564Z"
+}

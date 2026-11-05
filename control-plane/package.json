@@ -1,0 +1,12 @@
+{
+  "name": "aurora-control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aurora signed-contract delivery on Cloudflare Workers with offline fallback.",
+  "scripts": {
+    "test": "node --test",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}

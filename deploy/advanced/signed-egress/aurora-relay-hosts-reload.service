@@ -1,0 +1,16 @@
+# Template: restarts the relay entry so it reads the new signed home IP. Started by
+# aurora-relay-hosts.path. See docs/advanced-signed-egress.md.
+#
+# Install as /etc/systemd/system/aurora-relay-hosts-reload.service.
+[Unit]
+Description=Reload the Aurora relay entry after the home IP changes
+After=aurora-relay-agent.service
+
+[Service]
+Type=oneshot
+# aurora-node.service is the unit install.sh creates for sing-box.
+ExecStart=/usr/bin/systemctl try-restart aurora-node.service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

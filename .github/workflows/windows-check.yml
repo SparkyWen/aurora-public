@@ -1,0 +1,281 @@
+# Pre-tag checks for the Windows and Linux desktop paths, so problems show up
+# before a release rather than at it.
+#
+# Background: a %APPDATA% context mismatch (the service runs as LocalSystem, the
+# app as the logged-in user) once made every /start return "403 config path
+# outside allowed dir", while CI only checked that the build succeeded. This
+# workflow covers what can be falsified before release:
+#   1. aurora-svc unit tests + vet (including the regression test that a path
+#      must never come from a per-user variable);
+#   2. the installer script compiles, and the standalone SCM/process fixtures
+#      verify the stop barrier and process ownership;
+#   3. the Linux packaging script build-deb.sh really fails fast when binaries
+#      are missing, and produces a valid .deb (control, postinst, prerm) when
+#      they are all present.
+#
+# Items 2 and 3 use placeholder artifacts (fake binaries, fake directories) and
+# no full Flutter build: the goal is to falsify the scripts early, not to
+# replicate the release pipeline. The file name predates Linux support; it is
+# kept because branch protection rules may reference it as a required check.
+
+name: windows-check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop/aurora-svc/**"
+      - "app/windows/**"
+      - "app/linux/**"
+      - "app/bin/**"
+      - "app/lib/cli/**"
+      - "app/lib/core/aurora_svc_client.dart"
+      # The compiler also carries desktop-specific semantics (no IPv6 address on
+      # the TUN when IPv6 is blocked, pinned egress NIC mutually exclusive with
+      # auto_detect_interface), so changing it must run these checks.
+      - "app/lib/core/config_compiler.dart"
+      - "app/lib/core/windows_paths.dart"
+      - "app/lib/core/svc_installer.dart"
+      - ".github/workflows/windows-check.yml"
+  pull_request:
+    paths:
+      - "desktop/aurora-svc/**"
+      - "app/windows/**"
+      - "app/linux/**"
+      - "app/bin/**"
+      - "app/lib/cli/**"
+      - "app/lib/core/aurora_svc_client.dart"
+      - "app/lib/core/config_compiler.dart"
+      - "app/lib/core/windows_paths.dart"
+      - "app/lib/core/svc_installer.dart"
+      - ".github/workflows/windows-check.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  aurora-svc:
+    name: aurora-svc tests + windows/linux build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/aurora-svc/go.mod
+          cache-dependency-path: desktop/aurora-svc/go.sum
+      - name: Test
+        working-directory: desktop/aurora-svc
+        run: go test ./...
+      - name: Vet (host + windows)
+        working-directory: desktop/aurora-svc
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+      - name: Build for Windows
+        working-directory: desktop/aurora-svc
+        run: GOOS=windows GOARCH=amd64 go build -o /dev/null ./...
+      # The runner is linux/amd64, so test and vet already cover this target. The
+      # explicit build only keeps the steps symmetric with the Windows
+      # cross-compile above.
+      - name: Build for Linux
+        working-directory: desktop/aurora-svc
+        run: GOOS=linux GOARCH=amd64 go build -o /dev/null ./...
+
+  installer-script:
+    name: Inno Setup script compiles
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/aurora-svc/go.mod
+          cache-dependency-path: desktop/aurora-svc/go.sum
+      - name: Test native Windows adapter enumeration and service stop progress
+        working-directory: desktop/aurora-svc
+        run: go test -count=1 -run '^TestWindows(Tunnel|Service)' ./...
+      - name: Test native Windows single-instance lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $build = Join-Path $env:RUNNER_TEMP "aurora-runner-tests"
+          cmake -S app/windows/runner/tests -B $build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "native test configuration failed" }
+          cmake --build $build --config Release
+          if ($LASTEXITCODE -ne 0) { throw "native test build failed" }
+          $test = Join-Path $build "Release/single_instance_test.exe"
+          # The old behaviour model exists only in the test harness: without the
+          # guard, a second process would enter the engine.
+          & $test --legacy-model
+          if ($LASTEXITCODE -ne 1) { throw "legacy model must fail the duplicate-instance regression" }
+          & $test
+          if ($LASTEXITCODE -ne 0) { throw "production single-instance regression failed" }
+      - name: Compile aurora.iss against a placeholder payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe not found after install" }
+
+          # Placeholder payload: the script only requires the directory to exist
+          # and be non-empty.
+          $src = Join-Path $env:RUNNER_TEMP "payload"
+          New-Item -ItemType Directory -Force -Path "$src\data" | Out-Null
+          Set-Content -Path "$src\aurora.exe" -Value "placeholder"
+          Set-Content -Path "$src\aurora-svc.exe" -Value "placeholder"
+          Set-Content -Path "$src\sing-box.exe" -Value "placeholder"
+          Set-Content -Path "$src\wintun.dll" -Value "placeholder"
+          Set-Content -Path "$src\data\placeholder.txt" -Value "placeholder"
+
+          $out = Join-Path $env:RUNNER_TEMP "out"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          & $iscc /Qp `
+            "/DAppVersion=0.0.0" `
+            "/DSourceDir=$src" `
+            "/DOutputDir=$out" `
+            "/DOutputBase=aurora-syntax-check" `
+            "app/windows/installer/aurora.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+          Get-Item "$out\aurora-syntax-check.exe" | Select-Object Name, Length
+
+      - name: Test installer process ownership and service-stop barrier
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $evidence = Join-Path $env:RUNNER_TEMP "aurora-installer-lifecycle-evidence"
+          & app/windows/installer/tests/run.ps1 -Stage Current -EvidenceDirectory $evidence
+          if ($LASTEXITCODE -ne 0) { throw "native installer lifecycle regression failed" }
+
+      - name: Upload installer lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-lifecycle-evidence
+          path: ${{ runner.temp }}/aurora-installer-lifecycle-evidence/
+          if-no-files-found: ignore
+
+  linux-packaging-script:
+    name: build-deb.sh sanity (fail-fast guard + real package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # With sing-box/aurora-svc/aurora/aurora-cli missing, this assertion must
+      # really fail. It is the only safety net the release workflow's Linux job
+      # relies on, so prove here that it has not been quietly broken.
+      - name: Guard fires on an empty bundle dir
+        run: |
+          set -euo pipefail
+          empty="$RUNNER_TEMP/empty-bundle"
+          out="$RUNNER_TEMP/out-should-not-exist"
+          mkdir -p "$empty"
+          if bash app/linux/packaging/build-deb.sh 0.0.0 "$empty" "$out"; then
+            echo "build-deb.sh must fail when the bundled binaries are missing" >&2
+            exit 1
+          fi
+          echo "OK: build-deb.sh failed on an empty bundle directory, as expected"
+
+      # Placeholder binaries: all required files exist but are not the real
+      # thing. This only proves the packaging script itself (control file,
+      # postinst/prerm, dpkg-deb) works when the binaries are present; it says
+      # nothing about size or dependencies. dpkg-deb ships on ubuntu-latest.
+      - name: Build a placeholder .deb end to end
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/payload"
+          mkdir -p "$bundle"
+          for f in aurora sing-box aurora-svc aurora-cli; do
+            printf '#!/bin/sh\nexit 0\n' > "$bundle/$f"
+            chmod +x "$bundle/$f"
+          done
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          bash app/linux/packaging/build-deb.sh 0.0.0 "$bundle" "$out"
+          deb="$out/aurora_0.0.0_amd64.deb"
+          test -f "$deb" || { echo "expected .deb not produced: $deb"; exit 1; }
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+
+  linux-desktop-build:
+    name: Linux desktop build (GUI + CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev \
+            libayatana-appindicator3-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      # The app embeds no contract, so nothing needs to be placed before building.
+      - name: Analyze + test
+        working-directory: app
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      # The CLI must be pure Dart: a single package:flutter/* import under
+      # lib/cli/ breaks this step. It is the only machine check of that rule.
+      - name: Build aurora-cli
+        working-directory: app
+        run: |
+          set -euo pipefail
+          dart build cli -o build/cli
+          install -m 0755 build/cli/bundle/bin/aurora_cli linux/aurora-svc/aurora-cli
+          ./linux/aurora-svc/aurora-cli help
+
+      # This step also compiles linux/runner/my_application.cc: the "forward
+      # arguments to aurora-cli" and "explain when there is no DISPLAY" code
+      # paths can only be verified here.
+      - name: Build the GUI bundle
+        working-directory: app
+        run: |
+          set -euo pipefail
+          printf '#!/bin/sh\nexit 0\n' > linux/aurora-svc/sing-box
+          printf '#!/bin/sh\nexit 0\n' > linux/aurora-svc/aurora-svc
+          chmod +x linux/aurora-svc/sing-box linux/aurora-svc/aurora-svc
+          flutter build linux --release
+          bundle=build/linux/x64/release/bundle
+          for f in aurora aurora-cli sing-box aurora-svc; do
+            test -x "$bundle/$f" || { echo "missing from bundle: $f"; exit 1; }
+          done
+          test -f "$bundle/data/flutter_assets/version.json" \
+            || { echo "version.json missing: aurora-cli cannot report a version"; exit 1; }
+
+      # Running the GUI with no DISPLAY must print the CLI hint and exit 1, not
+      # GTK's "cannot open display".
+      - name: Headless launch prints the CLI hint
+        working-directory: app
+        run: |
+          set -euo pipefail
+          bundle=build/linux/x64/release/bundle
+          out=$(env -u DISPLAY -u WAYLAND_DISPLAY "$bundle/aurora" 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          test "$rc" = "1" || { echo "expected exit code 1, got $rc"; exit 1; }
+          echo "$out" | grep -q "aurora connect" \
+            || { echo "missing command-line hint"; exit 1; }
+          echo "$out" | grep -q "no graphical environment" \
+            || { echo "missing no-display explanation"; exit 1; }
+
+      # With arguments, aurora must exec the CLI next to it instead of opening a window.
+      - name: aurora <verb> execs the CLI
+        working-directory: app
+        run: |
+          set -euo pipefail
+          bundle=build/linux/x64/release/bundle
+          out=$(env -u DISPLAY -u WAYLAND_DISPLAY "$bundle/aurora" version)
+          echo "$out"
+          echo "$out" | grep -q '^aurora ' || { echo "not forwarded to aurora-cli"; exit 1; }

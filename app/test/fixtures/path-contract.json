@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "revision": 200,
+  "updated": "2026-07-22T00:00:00Z",
+  "profile": {"name": "Aurora", "owner": "self", "default_mode": "global"},
+  "network": {"mtu": 1400, "ipv6_mode": "block", "suppress_https_rr": false},
+  "delivery": {"primary": "https://control.example.net/v2/contract", "fallbacks": [], "token": "TEST_TOKEN"},
+  "nodes": [
+    {"id":"relay-entry-reality","role":"entry","protocol":"vless-reality","server":"198.51.100.8","port":443,"params":{"uuid":"00000000-0000-0000-0000-000000000001","flow":"xtls-rprx-vision","sni":"www.microsoft.com","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","short_id":"89abcdef","fingerprint":"chrome"}},
+    {"id":"relay-entry-hy2","role":"entry","protocol":"hysteria2","server":"198.51.100.8","port":443,"params":{"password":"RELAY_HY2_PLACEHOLDER","sni":"www.bing.com","alpn":["h3"],"certificate_public_key_sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},
+    {"id":"relay-entry-ss","role":"entry","protocol":"shadowsocks-2022","server":"198.51.100.8","port":8443,"params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-via-relay-public-reality","role":"exit","protocol":"shadowsocks-2022","server":"home.example.net","port":2053,"detour":"relay-entry-reality","params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-via-relay-public-hy2","role":"exit","protocol":"shadowsocks-2022","server":"home.example.net","port":2053,"detour":"relay-entry-hy2","params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-via-relay-public-ss","role":"exit","protocol":"shadowsocks-2022","server":"home.example.net","port":2053,"detour":"relay-entry-ss","params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-via-relay-tailnet-reality","role":"exit","protocol":"shadowsocks-2022","server":"100.64.0.26","port":8388,"detour":"relay-entry-reality","params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-via-relay-tailnet-hy2","role":"exit","protocol":"shadowsocks-2022","server":"100.64.0.26","port":8388,"detour":"relay-entry-hy2","params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-via-relay-tailnet-ss","role":"exit","protocol":"shadowsocks-2022","server":"100.64.0.26","port":8388,"detour":"relay-entry-ss","params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}},
+    {"id":"home-reality","role":"primary","protocol":"vless-reality","server":"203.0.113.10","port":8443,"params":{"uuid":"00000000-0000-0000-0000-000000000002","flow":"xtls-rprx-vision","sni":"www.microsoft.com","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","short_id":"0123abcd","fingerprint":"chrome"}},
+    {"id":"home-hy2","role":"fast","protocol":"hysteria2","server":"203.0.113.10","port":443,"params":{"password":"HOME_HY2_PLACEHOLDER","sni":"www.bing.com","alpn":["h3"],"certificate_public_key_sha256":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}},
+    {"id":"home-ss","role":"backup","protocol":"shadowsocks-2022","server":"203.0.113.10","port":2053,"params":{"method":"2022-blake3-aes-128-gcm","password":"AAAAAAAAAAAAAAAAAAAAAA==","multiplex":true}}
+  ],
+  "outbound_group": {
+    "selector": {"tag":"proxy","members":["auto","home-reality","home-hy2","home-ss"],"default":"auto"},
+    "urltest": {"tag":"auto","members":["home-reality","home-hy2","home-ss"],"url":"https://www.gstatic.com/generate_204","interval":"3m"}
+  },
+  "paths": {
+    "preferred": "relay_public",
+    "items": {
+      "relay_public": {"group_tag":"relay-public-auto","members":["home-via-relay-public-reality","home-via-relay-public-hy2","home-via-relay-public-ss"]},
+      "relay_tailnet": {"group_tag":"relay-tailnet-auto","members":["home-via-relay-tailnet-reality","home-via-relay-tailnet-hy2","home-via-relay-tailnet-ss"]},
+      "home": {"group_tag":"home-auto","members":["home-reality","home-hy2","home-ss"]}
+    }
+  },
+  "path_policy": {
+    "mode":"prefer_relay","fallback":"home","fallback_order":["relay_tailnet","home"],
+    "health":{"rolling_window":6,"min_success_rate":0.83,"hard_fail_rounds":2,"performance_fail_rounds":4,"latency_ratio":3.0,"latency_delta_ms":600,"recovery_success_rounds":3,"recovery_stable_seconds":120,"flap_window_seconds":600,"flap_limit":2,"flap_cooldown_seconds":900}
+  },
+  "egress": {"bootstrap_ipv4":"203.0.113.10","lease_url":"https://control.example.net/v2/egress-lease","lease_key_id":"home-egress-1","lease_public_key":"A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=","home_name":"home.example.net","expected_country":"US","expected_asn":"AS64496"}
+}

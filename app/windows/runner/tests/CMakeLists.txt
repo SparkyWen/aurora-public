@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.14)
+project(aurora_runner_tests LANGUAGES CXX)
+add_executable(single_instance_test single_instance_test.cpp ../single_instance.cpp)
+target_compile_features(single_instance_test PRIVATE cxx_std_17)
+target_compile_definitions(single_instance_test PRIVATE UNICODE _UNICODE NOMINMAX)
+target_compile_options(single_instance_test PRIVATE /W4 /WX)
+target_link_libraries(single_instance_test PRIVATE user32)

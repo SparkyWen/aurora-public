@@ -1,0 +1,15 @@
+# Template: notices when the relay agent replaces the signed hosts file. The agent
+# only rewrites it when the signed home IP changes, so this does not fire on every
+# poll. See docs/advanced-signed-egress.md.
+#
+# Install as /etc/systemd/system/aurora-relay-hosts.path, next to
+# aurora-relay-hosts-reload.service.
+[Unit]
+Description=Watch the signed home hosts file
+
+[Path]
+PathChanged=/run/aurora-relay/home-hosts
+Unit=aurora-relay-hosts-reload.service
+
+[Install]
+WantedBy=multi-user.target

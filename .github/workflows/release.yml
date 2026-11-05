@@ -1,0 +1,532 @@
+# Pushing a tag (v*) builds the Windows x64 installer, the Android arm64-v8a APK
+# and the Linux amd64 packages, then attaches them to a draft GitHub Release.
+# Review the draft and publish it by hand.
+#
+# No tests run here; the check workflows cover that. This workflow only builds.
+#
+# Four jobs: the three build jobs (windows-app / android-apk / linux) each only
+# produce an artifact, and the final release job downloads them all, assembles the
+# notes and saves the draft. They are split because several jobs creating a
+# release for the same tag overwrite each other (the last one wins), and the notes
+# must list the real file name and size of every package.
+#
+# A public release contains no credentials: the app embeds no contract, and users
+# add their own server by importing an aurora:// link.
+#
+# Optional secrets (the release builds without any of them; the notes state which
+# signing was actually used):
+#   ANDROID_KEYSTORE_B64       Base64 of a release keystore (.jks). Without it the
+#                              APK is debug-signed: it installs, but its signature
+#                              differs from a release-signed build, so it cannot
+#                              upgrade one in place.
+#   ANDROID_KEYSTORE_PASSWORD  Keystore password
+#   ANDROID_KEY_ALIAS          Key alias
+#   ANDROID_KEY_PASSWORD       Key password
+#
+# libbox.aar is not committed (gitignored binary); CI binds it from source with the
+# sagernet gomobile fork (arm64 only, about 3 minutes) and caches it by the content
+# hash of core/**, so a cache hit skips the whole step. Actions caches are isolated
+# per ref: a tag run can only read caches saved on main. To speed up a tag release,
+# run this workflow manually on main once to warm the cache (it stays valid while
+# core/** is unchanged).
+#
+# Windows does not use libbox: it runs the official sing-box.exe + wintun.dll plus
+# aurora-svc.exe built from this repo (a bundled trio, see
+# app/windows/aurora-svc/README.md); CI downloads/builds them and
+# app/windows/CMakeLists.txt copies them into the output directory. Linux is the
+# same minus wintun (a bundled pair: sing-box + aurora-svc, see
+# app/linux/aurora-svc/README.md) and produces a .deb (the postinst enables the
+# systemd service) plus a tar.gz as a manual-install fallback.
+#
+# Manual run: Actions -> release -> Run workflow (on a branch it only produces
+# artifacts and does not create a release).
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  # Same version as the core's go.mod, so client and server run the same schema.
+  SINGBOX_VERSION: "1.13.14"
+  WINTUN_VERSION: "0.14.1"
+
+jobs:
+  windows-app:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/aurora-svc/go.mod
+          cache-dependency-path: desktop/aurora-svc/go.sum
+
+      # The bundle is the official sing-box.exe, the official wintun.dll and the
+      # aurora-svc.exe built from this repo. If any one is missing CMake only
+      # prints a WARNING and skips it: the build still succeeds but every connect
+      # fails. So each file is asserted below, making CI fail early instead of
+      # shipping a package that cannot connect.
+      - name: Fetch sing-box.exe + wintun.dll
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dir = "app/windows/aurora-svc"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          # Keep downloads outside the repo, or Go records the clean source as
+          # vcs.modified=true.
+          $downloadDir = Join-Path $env:RUNNER_TEMP ("aurora-native-" + [Guid]::NewGuid().ToString("N"))
+          New-Item -ItemType Directory -Path $downloadDir | Out-Null
+          try {
+            $sb = "sing-box-$env:SINGBOX_VERSION-windows-amd64"
+            $sbArchive = Join-Path $downloadDir "sing-box.zip"
+            $sbExtracted = Join-Path $downloadDir "singbox"
+            Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v$env:SINGBOX_VERSION/$sb.zip" -OutFile $sbArchive
+            Expand-Archive -LiteralPath $sbArchive -DestinationPath $sbExtracted
+            Copy-Item (Join-Path $sbExtracted "$sb/sing-box.exe") "$dir/sing-box.exe" -Force
+
+            $wintunArchive = Join-Path $downloadDir "wintun.zip"
+            $wintunExtracted = Join-Path $downloadDir "wintun"
+            Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-$env:WINTUN_VERSION.zip" -OutFile $wintunArchive
+            Expand-Archive -LiteralPath $wintunArchive -DestinationPath $wintunExtracted
+            Copy-Item (Join-Path $wintunExtracted "wintun/bin/amd64/wintun.dll") "$dir/wintun.dll" -Force
+          } finally {
+            Remove-Item -LiteralPath $downloadDir -Recurse -Force
+          }
+
+      - name: Build aurora-svc.exe
+        shell: pwsh
+        working-directory: desktop/aurora-svc
+        run: |
+          $ErrorActionPreference = "Stop"
+          $status = git status --porcelain
+          if ($LASTEXITCODE -ne 0) { throw "Unable to check release source status" }
+          if ($status) { throw "Release source tree is dirty before Go build" }
+          go build -o ../../app/windows/aurora-svc/aurora-svc.exe ./...
+          if ($LASTEXITCODE -ne 0) { throw "aurora-svc build failed" }
+
+      - name: Verify the bundle trio is present
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($f in @("sing-box.exe", "wintun.dll", "aurora-svc.exe")) {
+            $p = "app/windows/aurora-svc/$f"
+            if (!(Test-Path $p)) { throw "missing bundle file: $p" }
+            "{0,-16} {1,10:N0} bytes" -f $f, (Get-Item $p).Length
+          }
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      - name: Build Windows release
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      # The primary download is an Inno Setup installer: it installs into Program
+      # Files, registers and starts AuroraSvc with administrator rights and creates
+      # shortcuts, so it works right after installing (see
+      # app/windows/installer/aurora.iss). A zip cannot do that, and running a
+      # privileged service's sing-box.exe from a user-writable extraction folder is
+      # a privilege-escalation hazard in itself.
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe not found after install" }
+
+          # The version comes from pubspec (it is also what the app reports); the
+          # file name comes from the tag.
+          $line = Select-String -Path app/pubspec.yaml -Pattern '^version:\s*(\S+)' | Select-Object -First 1
+          $ver = ($line.Matches[0].Groups[1].Value -split '\+')[0]
+          if (-not $ver) { throw "could not read version from app/pubspec.yaml" }
+          $tag = "${{ github.ref_name }}" -replace '/', '-'
+          $base = "aurora-$tag-windows-x64-setup"
+
+          & $iscc /Qp `
+            "/DAppVersion=$ver" `
+            "/DSourceDir=$(Resolve-Path 'app/build/windows/x64/runner/Release')" `
+            "/DOutputDir=$(Get-Location)" `
+            "/DOutputBase=$base" `
+            "app/windows/installer/aurora.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with $LASTEXITCODE" }
+
+          "SETUP_NAME=$base.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "{0} {1:N0} bytes" -f "$base.exe", (Get-Item "$base.exe").Length
+
+      # A portable zip is still produced as a fallback if the installer misbehaves.
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${{ github.ref_name }}" -replace '/', '-'
+          $name = "aurora-$tag-windows-x64-portable.zip"
+          Compress-Archive -Path "app/build/windows/x64/runner/Release/*" -DestinationPath $name -Force
+          "ZIP_NAME=$name" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: |
+            ${{ env.SETUP_NAME }}
+            ${{ env.ZIP_NAME }}
+          if-no-files-found: error
+
+  android-apk:
+    name: Android arm64-v8a APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The key carries the gomobile version and the content hash of core/**, so
+      # any change to the core (including the go.mod pins) rebuilds libbox.
+      - name: Restore cached libbox.aar
+        id: libbox
+        uses: actions/cache@v4
+        with:
+          path: app/android/app/libs/libbox.aar
+          key: libbox-arm64-gomobile-v0.1.12-v2-${{ hashFiles('core/**') }}
+
+      - name: Set up Go (libbox rebuild only)
+        if: steps.libbox.outputs.cache-hit != 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+
+      - name: Build libbox.aar (gomobile bind, arm64 only)
+        if: steps.libbox.outputs.cache-hit != 'true'
+        run: |
+          echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" >/dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          gomobile init
+          # init installs gobind@latest internally; restore the pinned generator.
+          go install github.com/sagernet/gomobile/cmd/gobind@v0.1.12
+          # Verify the binaries on PATH are the pinned sagernet fork, not upstream
+          # x/mobile (which cannot handle NDK r26+): `go version -m` prints the
+          # module path and version compiled into each binary.
+          for tool in gomobile gobind; do
+            tool_info="$(go version -m "$(command -v "$tool")")"
+            printf '%s\n' "$tool_info"
+            printf '%s\n' "$tool_info" | awk -v expected_path="github.com/sagernet/gomobile/cmd/$tool" '
+              $1 == "path" && $2 == expected_path { command_ok = 1 }
+              $1 == "mod" && $2 == "github.com/sagernet/gomobile" && $3 == "v0.1.12" { module_ok = 1 }
+              END { exit !(command_ok && module_ok) }'
+          done
+          mkdir -p app/android/app/libs
+          make -C core android ABIS=android/arm64
+
+      - name: Set up release signing (optional)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "SIGNING_KIND=debug-signed (no ANDROID_KEYSTORE_B64 secret; this signature differs from a release-signed build, so it cannot upgrade one in place)" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > app/android/aurora-release.jks
+          {
+            echo "storeFile=aurora-release.jks"
+            echo "storePassword=$STORE_PASS"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASS"
+          } > app/android/key.properties
+          echo "SIGNING_KIND=release-signed (key from the ANDROID_KEYSTORE_B64 secret)" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      - name: Build APK (arm64-v8a)
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --target-platform android-arm64
+          TAG="${GITHUB_REF_NAME//\//-}"
+          APK="aurora-${TAG}-arm64-v8a.apk"
+          mv build/app/outputs/flutter-apk/app-release.apk "build/app/outputs/flutter-apk/$APK"
+          echo "APK_NAME=$APK" >> "$GITHUB_ENV"
+
+      # Only this job knows which signing was actually used, but the release job
+      # writes the notes; carry the answer over in a small file instead of
+      # letting the notes guess.
+      - name: Record build kinds for the release notes
+        run: |
+          mkdir -p meta
+          echo "SIGNING_KIND=$SIGNING_KIND" > meta/android-kinds.env
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-package
+          path: |
+            app/build/app/outputs/flutter-apk/${{ env.APK_NAME }}
+            meta/android-kinds.env
+          if-no-files-found: error
+
+  linux:
+    name: Linux .deb + tar.gz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: desktop/aurora-svc/go.mod
+          cache-dependency-path: desktop/aurora-svc/go.sum
+
+      # Flutter Linux desktop needs GTK, tray_manager needs appindicator and
+      # flutter_secure_storage needs libsecret. A missing one fails at build time,
+      # not at run time.
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev \
+            libayatana-appindicator3-dev
+
+      # The bundle is the official sing-box plus aurora-svc built from this repo
+      # (no wintun on Linux, see app/linux/aurora-svc/README.md). Both are blocked
+      # by .gitignore (binaries are not committed), so CI downloads/builds them.
+      - name: Fetch sing-box
+        run: |
+          set -euo pipefail
+          dir=app/linux/aurora-svc
+          mkdir -p "$dir"
+          # Download and extract under RUNNER_TEMP; only the final binary is
+          # copied into the ignored bundle directory.
+          download_dir="$(mktemp -d "${RUNNER_TEMP}/aurora-native.XXXXXX")"
+          trap 'rm -rf -- "$download_dir"' EXIT
+          sb="sing-box-${SINGBOX_VERSION}-linux-amd64"
+          curl -fsSL -o "$download_dir/sing-box.tar.gz" \
+            "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/${sb}.tar.gz"
+          tar -xzf "$download_dir/sing-box.tar.gz" -C "$download_dir"
+          install -m 0755 "$download_dir/${sb}/sing-box" "$dir/sing-box"
+
+      - name: Build aurora-svc
+        run: |
+          set -euo pipefail
+          status="$(git status --porcelain)"
+          if [[ -n "$status" ]]; then
+            echo "Release source tree is dirty before Go build" >&2
+            exit 1
+          fi
+          dir=app/linux/aurora-svc
+          (cd desktop/aurora-svc && GOOS=linux GOARCH=amd64 go build -o "../../$dir/aurora-svc" ./...)
+          chmod +x "$dir/aurora-svc"
+
+      # If either is missing CMake only prints a WARNING and skips it: the build
+      # still succeeds but every connect fails. Assert each one so CI fails early
+      # instead of shipping a package that cannot connect.
+      - name: Verify the bundle pair is present
+        run: |
+          set -euo pipefail
+          dir=app/linux/aurora-svc
+          for f in sing-box aurora-svc; do
+            test -x "$dir/$f" || { echo "missing bundle file: $dir/$f"; exit 1; }
+            printf '%-16s %10s bytes\n' "$f" "$(stat -c%s "$dir/$f")"
+          done
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+
+      # The command-line build (aurora-cli) uses `dart build cli` rather than
+      # `dart compile exe`: the dependency graph contains a package with a build
+      # hook (objective_c, pulled in by path_provider_foundation) and
+      # `dart compile` rejects that outright. The hook is a no-op off Apple
+      # platforms, so the Linux bundle contains nothing but the executable.
+      # This must run before `flutter build linux`: the CMake install rules pick
+      # the file up from linux/aurora-svc/.
+      - name: Build Linux release
+        working-directory: app
+        run: |
+          set -euo pipefail
+          flutter pub get
+          dart build cli -o build/cli
+          install -m 0755 build/cli/bundle/bin/aurora_cli linux/aurora-svc/aurora-cli
+          test -x linux/aurora-svc/aurora-cli
+          flutter build linux --release
+
+      # The primary download is the .deb: its postinst runs
+      # `systemctl enable --now aurora-svc`, so it works right after install, the
+      # same goal as the Windows installer. The tar.gz remains as a manual-install
+      # fallback for non-systemd / non-deb distributions (or a broken .deb), like
+      # the Windows portable zip.
+      - name: Package
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^version:[[:space:]]*\([^+]*\).*/\1/p' app/pubspec.yaml | head -1)
+          if [ -z "$ver" ]; then echo "could not read version from app/pubspec.yaml"; exit 1; fi
+          tag="${GITHUB_REF_NAME//\//-}"
+          bundle=app/build/linux/x64/release/bundle
+          mkdir -p dist
+          bash app/linux/packaging/build-deb.sh "$ver" "$bundle" dist
+          tar -C "$bundle" -czf "dist/aurora-${tag}-linux-x64.tar.gz" .
+          for f in dist/*; do
+            printf '%-40s %10s bytes\n' "$(basename "$f")" "$(stat -c%s "$f")"
+          done
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-package
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [windows-app, android-apk, linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect assets
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.apk' -o -name '*.zip' -o -name '*setup.exe' -o -name '*.deb' -o -name '*-linux-x64.tar.gz' \) -exec cp {} dist/ \;
+          # Checksums over every asset, attached as SHA256SUMS.txt.
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
+          ls -la dist
+          cat dist/SHA256SUMS.txt
+          {
+            echo "WIN_NAME=$(cd dist && ls *windows-x64-setup.exe)"
+            echo "WIN_SIZE=$(cd dist && du -m *windows-x64-setup.exe | cut -f1)"
+            echo "WIN_ZIP_NAME=$(cd dist && ls *windows-x64-portable.zip)"
+            echo "WIN_ZIP_SIZE=$(cd dist && du -m *windows-x64-portable.zip | cut -f1)"
+            echo "APK_NAME=$(cd dist && ls *.apk)"
+            echo "APK_SIZE=$(cd dist && du -m *.apk | cut -f1)"
+            echo "DEB_NAME=$(cd dist && ls *.deb)"
+            echo "DEB_SIZE=$(cd dist && du -m *.deb | cut -f1)"
+            echo "LINUX_TGZ_NAME=$(cd dist && ls *-linux-x64.tar.gz)"
+            echo "LINUX_TGZ_SIZE=$(cd dist && du -m *-linux-x64.tar.gz | cut -f1)"
+          } >> "$GITHUB_ENV"
+          kinds="$(find artifacts -name android-kinds.env | head -1)"
+          if [ -n "$kinds" ]; then cat "$kinds" >> "$GITHUB_ENV"; fi
+
+      # The download table must be the first screen of the body: opening a release
+      # should show what to install before a page of commits. softprops'
+      # append_body can only append after the auto-generated notes (there is no
+      # prepend), so the whole body is composed here.
+      - name: Compose release notes
+        run: |
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          {
+            echo "## Downloads"
+            echo
+            echo "| Platform | Package | Size | Notes |"
+            echo "| --- | --- | --- | --- |"
+            echo "| **Windows** | **[${WIN_NAME}](${BASE}/${WIN_NAME})** | ${WIN_SIZE} MB | x64 installer. Run it (one UAC prompt); it installs and starts the service, so nothing else is needed |"
+            echo "| **Android** | **[${APK_NAME}](${BASE}/${APK_NAME})** | ${APK_SIZE} MB | Android 7.0+, arm64 |"
+            echo "| **Linux** | **[${DEB_NAME}](${BASE}/${DEB_NAME})** | ${DEB_SIZE} MB | Ubuntu/Debian amd64: \`sudo dpkg -i ${DEB_NAME}\`. Enables and starts the systemd service |"
+            echo "| Windows (portable) | [${WIN_ZIP_NAME}](${BASE}/${WIN_ZIP_NAME}) | ${WIN_ZIP_SIZE} MB | Only if the installer fails. After extracting, install the service from Settings, and do not extract into a directory that may be deleted |"
+            echo "| Linux (manual) | [${LINUX_TGZ_NAME}](${BASE}/${LINUX_TGZ_NAME}) | ${LINUX_TGZ_SIZE} MB | For non-systemd or non-deb distributions: extract, then install \`aurora-svc.service\` yourself (see \`app/linux/packaging/\`) or run \`aurora-svc\` by hand |"
+            echo "| iOS / macOS | - | - | Not distributed. Apple signing requires your own developer account, so build these from source: see \`docs/building.md\` |"
+            echo "| Checksums | [SHA256SUMS.txt](${BASE}/SHA256SUMS.txt) | - | SHA-256 of every file above |"
+            echo
+            echo "- The Windows package bundles sing-box ${SINGBOX_VERSION}, wintun ${WINTUN_VERSION} and aurora-svc. The Linux .deb bundles sing-box ${SINGBOX_VERSION} and aurora-svc. Nothing else needs to be downloaded."
+            echo "- The Linux packages also include a command line that works without a desktop session (SSH, servers): \`aurora connect\`, \`aurora status\`, \`aurora disconnect\`."
+            echo "- The Windows installer has no code-signing certificate, so SmartScreen will warn: choose More info, then Run anyway."
+            echo "- Android signing: ${SIGNING_KIND:-unknown}."
+            echo "- **These builds contain no credentials and no server.** The app ships empty: add your own server by importing the \`aurora://\` link printed by \`install.sh\`."
+            echo
+            echo "### Verify your download"
+            echo
+            echo "Download \`SHA256SUMS.txt\` into the same folder as the packages, then run:"
+            echo
+            echo '```'
+            echo "sha256sum --ignore-missing -c SHA256SUMS.txt        # Linux"
+            echo "shasum -a 256 --ignore-missing -c SHA256SUMS.txt    # macOS"
+            echo "Get-FileHash <file> -Algorithm SHA256               # Windows PowerShell; compare with the line in SHA256SUMS.txt"
+            echo '```'
+            echo
+            echo "---"
+            echo
+            echo "## Changes"
+            echo
+            if [ -n "$PREV" ]; then
+              git log --no-merges --pretty=format:'- %s' "${PREV}..${GITHUB_REF_NAME}"
+              printf '\n\n'
+              echo "**Full comparison**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV}...${GITHUB_REF_NAME}"
+            else
+              git log --no-merges --pretty=format:'- %s' -30
+              printf '\n'
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      # Release titles follow "Aurora vX.Y.Z <summary>", but without a name
+      # softprops falls back to the bare tag. The summary is the first line of the
+      # annotated tag, so whatever is written when tagging becomes the title and
+      # there is one place to maintain.
+      - name: Compose release title
+        run: |
+          # actions/checkout materialises the tag as a lightweight ref pointing at
+          # the commit, so the annotated object is not fetched and
+          # %(contents:subject) would return the commit subject. Fetch the tag
+          # object explicitly.
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          SUBJECT="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents:subject)')"
+          # Strip a leading "vX.Y.Z - " from the annotation so the version does
+          # not appear twice in the title.
+          SUBJECT="${SUBJECT#"${GITHUB_REF_NAME}" - }"
+          SUBJECT="${SUBJECT#"${GITHUB_REF_NAME}"}"
+          SUBJECT="$(printf '%s' "$SUBJECT" | sed 's/^[[:space:]-]*//')"
+          if [ -z "$SUBJECT" ]; then
+            TITLE="Aurora ${GITHUB_REF_NAME}"
+          else
+            TITLE="Aurora ${GITHUB_REF_NAME} - ${SUBJECT}"
+          fi
+          echo "RELEASE_TITLE=${TITLE}" >> "$GITHUB_ENV"
+          echo "title: ${TITLE}"
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The tag produces a draft first. A successful build does not replace
+          # verifying the exact packages on real devices, and an incomplete asset
+          # set should not become "latest".
+          draft: true
+          name: ${{ env.RELEASE_TITLE }}
+          body_path: release-notes.md
+          append_body: false
+          generate_release_notes: false
+          files: dist/*

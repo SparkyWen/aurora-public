@@ -1,0 +1,38 @@
+name: android-native-check
+
+on:
+  pull_request:
+    paths: ["app/android/**", "core/go.mod", "core/go.sum", ".github/workflows/android-native-check.yml"]
+  push:
+    branches: [main]
+    paths: ["app/android/**", "core/go.mod", "core/go.sum", ".github/workflows/android-native-check.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  kotlin-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      # The compiler is downloaded from a release page, so its checksum is pinned:
+      # a tampered or re-uploaded archive fails the build instead of running.
+      - name: Fetch verified standalone Kotlin compiler
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 120 \
+            https://github.com/JetBrains/kotlin/releases/download/v2.2.0/kotlin-compiler-2.2.0.zip \
+            --output "$RUNNER_TEMP/kotlin.zip"
+          echo "1adb6f1a5845ba0aa5a59e412e44c8e405236b957de1a9683619f1dca3b16932  $RUNNER_TEMP/kotlin.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/kotlin.zip" -d "$RUNNER_TEMP/aurora-kotlin"
+      - name: Compile actual VPN classes and exercise OS/JNI boundaries
+        shell: bash
+        run: |
+          KOTLINC="$RUNNER_TEMP/aurora-kotlin/kotlinc/bin/kotlinc" \
+            bash app/android/native-test/run.sh

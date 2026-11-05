@@ -1,0 +1,196 @@
+# The main check for everything that does not need a specific operating system. The important job is
+# `node-install`: it runs the one-command installer for real, as root, under systemd on a clean Ubuntu
+# machine, which is the one thing the no-root test suite cannot prove (service user permissions, sandboxing,
+# low port binding, the firewall path).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  SING_BOX_VERSION: "1.13.14"
+
+jobs:
+  repo-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash scripts/check-repo-policy.sh
+
+  installer-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck
+        run: |
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -s bash -S warning install.sh deploy/test/*.sh
+      - name: The installer stays bash 3.2 compatible (macOS ships 3.2)
+        run: |
+          # Features newer than bash 3.2 that are easy to reach for.
+          if grep -nE '(^|[^[:alnum:]_])(declare|local) -A|mapfile|readarray|\$\{[A-Za-z_]+(,,|\^\^)\}' install.sh; then
+            echo "install.sh uses a bash feature macOS does not have" >&2
+            exit 1
+          fi
+
+  installer-tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+      # scripts/test/ builds the edge agents and signs fixtures with Node.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: edge-agent/go.mod
+          cache-dependency-path: desktop/aurora-svc/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch sing-box
+        run: |
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) slug=linux-amd64 ;;
+            Darwin-arm64) slug=darwin-arm64 ;;
+            Darwin-x86_64) slug=darwin-amd64 ;;
+            *) echo "unexpected runner"; exit 1 ;;
+          esac
+          name="sing-box-${SING_BOX_VERSION}-${slug}"
+          curl -fsSL -o "$RUNNER_TEMP/sb.tar.gz" \
+            "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/${name}.tar.gz"
+          tar -xzf "$RUNNER_TEMP/sb.tar.gz" -C "$RUNNER_TEMP"
+          echo "SING_BOX=$RUNNER_TEMP/$name/sing-box" >> "$GITHUB_ENV"
+      - name: Installer end-to-end (no root, real traffic)
+        run: bash deploy/test/installer-test.sh
+      - name: Installer to app compiler (real traffic through every exit)
+        run: |
+          (cd app && flutter pub get)
+          DART="$(command -v dart)" bash deploy/test/contract-e2e-test.sh
+      - name: Scripts
+        run: |
+          for test in scripts/test/*.sh deploy/extras/test/*.sh; do
+            echo "--- $test"
+            bash "$test"
+          done
+
+  node-install:
+    name: One-command install, for real
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install as the README says
+        run: |
+          # stdin, as under `curl | sudo bash`, so the truncation guard and self-install paths are exercised.
+          sudo bash -s -- --vps --name ci < install.sh
+      - name: The service runs as an unprivileged, sandboxed user
+        run: |
+          systemctl is-active aurora-node
+          test "$(systemctl show -p User --value aurora-node)" = aurora-node
+          test "$(ps -o user= -C sing-box | sort -u)" = aurora-node
+          sudo ss -ltnp | grep -E ':(443|8443) .*sing-box'
+          sudo ss -lunp | grep -E ':443 .*sing-box'
+      - name: Secrets are locked down
+        run: |
+          test "$(sudo stat -c '%a %U' /etc/aurora-node/node.env)" = "600 root"
+          test "$(sudo stat -c '%a %U' /etc/aurora-node/link.txt)" = "600 root"
+          # The service user can read its config but not the master state file.
+          sudo -u aurora-node test -r /etc/aurora-node/sing-box.json
+          ! sudo -u aurora-node test -r /etc/aurora-node/node.env
+      - name: The management command works
+        run: |
+          # On main the installer copied itself from raw.githubusercontent.com; elsewhere use the checkout.
+          test -x /usr/local/bin/aurora-node || sudo install -m 0755 install.sh /usr/local/bin/aurora-node
+          sudo aurora-node status
+          sudo aurora-node verify
+          sudo aurora-node link | grep -q 'aurora://v1/'
+      - name: Re-running keeps the keys
+        run: |
+          before="$(sudo cat /etc/aurora-node/link.txt)"
+          sudo bash install.sh --no-self-test
+          test "$before" = "$(sudo cat /etc/aurora-node/link.txt)"
+      - name: Survives a service restart
+        run: |
+          sudo systemctl restart aurora-node
+          sleep 2
+          sudo aurora-node verify
+      - name: Rotation replaces the keys and still works
+        run: |
+          before="$(sudo cat /etc/aurora-node/link.txt)"
+          sudo aurora-node rotate >/dev/null
+          test "$before" != "$(sudo cat /etc/aurora-node/link.txt)"
+          sudo aurora-node verify
+      - name: Uninstall removes everything
+        run: |
+          sudo aurora-node uninstall --purge
+          ! systemctl is-active aurora-node
+          test ! -e /etc/aurora-node
+          test ! -e /usr/local/bin/aurora-node
+          test ! -e /usr/local/lib/aurora-node
+          test ! -e /etc/systemd/system/aurora-node.service
+          ! id aurora-node
+      - name: Logs on failure
+        if: failure()
+        run: sudo journalctl -u aurora-node -n 100 --no-pager || true
+
+  flutter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+      - working-directory: app
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test --timeout 30s
+      - name: The CLI still compiles without Flutter
+        working-directory: app
+        run: dart build cli -o build/cli
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: edge-agent/go.mod
+          cache-dependency-path: desktop/aurora-svc/go.sum
+      - name: Edge agents
+        working-directory: edge-agent
+        run: |
+          go vet ./...
+          go test -race ./...
+      - name: Desktop service
+        working-directory: desktop/aurora-svc
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          go test ./...
+
+  control-plane:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - working-directory: control-plane
+        run: node --test

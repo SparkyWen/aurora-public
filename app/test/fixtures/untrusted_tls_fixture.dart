@@ -1,0 +1,60 @@
+// Public, disposable localhost test identity. Never trust or use in production.
+// This self-signed certificate is intentionally absent from system trust roots.
+import 'dart:convert';
+import 'dart:io';
+
+SecurityContext untrustedTlsContext() => SecurityContext()
+  ..useCertificateChainBytes(utf8.encode(_certificate))
+  ..usePrivateKeyBytes(utf8.encode(_publicTestPrivateKey));
+
+const _certificate = '''
+-----BEGIN CERTIFICATE-----
+MIICxDCCAawCCQDkU83BXBTyuDANBgkqhkiG9w0BAQsFADAkMSIwIAYDVQQDDBlh
+dXJvcmEtbG9jYWwtdGVzdC5pbnZhbGlkMB4XDTI2MDkxODA0MDc1NVoXDTM2MDkx
+NTA0MDc1NVowJDEiMCAGA1UEAwwZYXVyb3JhLWxvY2FsLXRlc3QuaW52YWxpZDCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMy29fFR4yoLb2exDnfrZ4Y5
+G15pjG0/Aao8cbgjSMYA0hyK1UvkAve/is62inSwKjArE+JEBk8sABdb7F2BOMoY
+gHwQYNby9mUq+0rv2kkljyHdiiPVdH0xhSrvRdvgqtzCWV1m5ARLXBx/mJZvWXa3
+oIBkyRw5hkU+zJAAm8rjW9VsFydV305IJ3plXuXlv+vSjIVtQmmB92j1/1JEW0Ae
+pDphYmwjQ6lA0gA4ZCkhuGYLBJL5Zfkc8KNRS6dooXXbcgEpB8vARi0sdIvNYX2m
+hkX4lA+XZzZMp45dsJNNyEzXspI/C/8qZAq8UUtyIdy8G7vL0HWop3dNgg9fBNsC
+AwEAATANBgkqhkiG9w0BAQsFAAOCAQEABXgpAg0ekvPY0eASduk4lIu9nO2BaVYU
+kCEJ0NAU70OcfkdVUE6ZceGJNHxaFsKcQZ17C2dZ7Z/AV57MmaEkB03BBQb7H1tc
+kR+WaH+nNLGwqGjafn2CXt3e6vaeVU04jBjUbhrcwJZQGuMQF8YQz2Q9diLBC42H
+OCCxT38UQ0TDw7pDYvP81VelS9gtqTXVuq9QvmN5pGbq6qXZYayf5C6/6B7aCTjr
+IwULrZLwA6FuGHKQCfYklvXac/Qsya4PPsMIt38uJoZPQhFWii5AyBaQHUCk8vg4
+EBZctlU5n6y6Mffwp8WS9eXQH1CLD5gaQItUy+rL/EQNfbVFO8RcSQ==
+-----END CERTIFICATE-----
+''';
+
+// Intentionally public fixture key, generated solely for this untrusted server.
+const _publicTestPrivateKey = '''
+-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDMtvXxUeMqC29n
+sQ5362eGORteaYxtPwGqPHG4I0jGANIcitVL5AL3v4rOtop0sCowKxPiRAZPLAAX
+W+xdgTjKGIB8EGDW8vZlKvtK79pJJY8h3Yoj1XR9MYUq70Xb4KrcwlldZuQES1wc
+f5iWb1l2t6CAZMkcOYZFPsyQAJvK41vVbBcnVd9OSCd6ZV7l5b/r0oyFbUJpgfdo
+9f9SRFtAHqQ6YWJsI0OpQNIAOGQpIbhmCwSS+WX5HPCjUUunaKF123IBKQfLwEYt
+LHSLzWF9poZF+JQPl2c2TKeOXbCTTchM17KSPwv/KmQKvFFLciHcvBu7y9B1qKd3
+TYIPXwTbAgMBAAECggEAQ74bvuKhMI2eLQsLRaWxmVoWc3SsEo6yB1p/KzcJ4vPs
+k6Nhl/54+PD6hxMi2CBfpZbruolWKSbfVNuHaR3U5BOdmPB2i0rVPH8vrwmWC3SR
+W9yK1PbS2IblkWKilHNRN0Jc/iqJM96YOZoDrWxlh4KWa0ZuwpdKlmmEmfaJl2Zz
+BmSsyI5yClJ8FDw4yNurqvAYkpqegL6kHwjk0op5MbnNE3TnarHhbvoyHT+9aRx+
+LUQqmeIeFgR5gwzk1VqHN90B/ET7p2rLL1T2F8LlomVUg2tFY2fRkwXS4I3M8cas
+0Po0svmMoi5ekSii8208NGGsFxWZCLdgkmGUhSCWMQKBgQD8Z7t4ZHjcAE+ucUaY
+tC+8GfxCC2kPEz43UngAmdK9d3EAi+fdTyLPXWElg9RabUCRVbJLETvICCuknzIU
+6WN1f0gublDaapq/Olrw0QFjQztuBn5gs7p6XjiNvFQ0Oj2tGfhZxEuTN0bOC3Kc
+oxtL6yRzVu655pJwRiwS8JjHYwKBgQDPoVlfWID6v8sXoToZ1qu6J1OffqpAHeK1
+brGa6PG4RTm/PdaWLNz+HQPXUYfzY94jm6guVVwdHoMrFnMAjr1cAIkRG1+Y4GdO
+MSGyOui7XXpApS+Qc5BHsR6eo1fQL+TcLfw2VXMj1xfJnHi+m5ypnHwc3rYb4QP/
+hpGBXH9yKQKBgFoKWzs4hFDfH424RRnmdXzhvDaHQYQqNjCgD8UPGrmSKVKrlhxB
+xcY5ppUucQuNG9J8wqy6yhuypncEf2YsV9mrfUFrAxbXnrqHA7gSpy8U5dd7I4w1
+sVlD0WLmgxdai3P75reHKfqrZmvMc6djHDK6AHfQ1DqnAShiMAjVoXrHAoGAQYoN
+2wHl3MDTy8axv1w64sztIYhrF0gXuuuRFnP3cRIw80QCy26n53KjNsFep55bjWPi
+B5YcOHjcMKqqbH+iGDt3CLZaS7hyA4WQvGDJ+/K611MNG4zO+0JWhv7KhkXH+RRu
+63u3l5WaxaIlnw0hu4xQxRAr7cruZydEINBgzlkCgYBXlLnCAvXICj/Xmu/so9Ie
+d9SrLkLlvFCsWonMCT4IPgtZPOd1xmEKzaBrGkN+FrEW+Oc+nvZ1zUR22NAzU3Js
+0T77Sh1MQje8DQgtl44xars2CpFBjJ1AW43Rzde5mBk3MGxbaEJXcHqLE9zBbM/q
+JkfHJUVJBLGDH3HasJGmTw==
+-----END PRIVATE KEY-----
+''';

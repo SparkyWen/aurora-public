@@ -1,0 +1,7 @@
+flutter/ephemeral
+
+# The three packaging inputs (official sing-box + locally built svc and CLI); do not commit.
+# See linux/aurora-svc/README.md.
+aurora-svc/sing-box
+aurora-svc/aurora-svc
+aurora-svc/aurora-cli
