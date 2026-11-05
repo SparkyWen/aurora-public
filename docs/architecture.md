@@ -106,7 +106,7 @@ inbound 80 and 443, and it adds UPnP port mapping and a maintenance timer that r
 mapping and any dynamic DNS record. A third mode, `relay`, installs an entry-only server bound to
 a home node (section 6).
 
-The link is base64url-encoded compact JSON (`app/lib/core/server_bundle.dart`). It describes a
+The link is base64url-encoded, gzip-compressed compact JSON (`app/lib/core/server_bundle.dart`). It describes a
 **server**, not a contract, so several links can be merged. It has to be small enough for a QR
 code on an 80-column terminal. The kinds are:
 

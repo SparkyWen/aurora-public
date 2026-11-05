@@ -1,8 +1,9 @@
 /// The `aurora://v1/...` import link: what `install.sh` prints and the app adds.
 ///
-/// The payload is base64url-encoded compact JSON. It stays compact because it has
-/// to fit a QR code on an 80-column terminal, and it describes a server rather
-/// than a contract, so one link can be merged with others. Expansion into contract
+/// The payload is base64url-encoded, gzip-compressed compact JSON. It is compressed
+/// because the usual link has to fit a QR code on an 80-column terminal (uncompressed
+/// it needs 83), and it describes a server rather than a contract, so one link can
+/// be merged with others. Expansion into contract
 /// nodes happens here and only here, which keeps the installer free of contract
 /// knowledge and gives the GUI and the CLI one implementation. See
 /// `docs/contract.md`.
@@ -11,6 +12,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:io' show gzip;
 
 const auroraLinkPrefix = 'aurora://v1/';
 
@@ -21,6 +23,10 @@ final _hostPattern = RegExp(
   r'^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$',
 );
 final _base64UrlPattern = RegExp(r'^[A-Za-z0-9_-]+$');
+
+/// Far above any real link, and it bounds what a hostile deep link can make gzip
+/// expand before anyone has tapped anything.
+const _maxEncodedLength = 4096;
 
 /// Thrown for anything wrong with a link. Messages never quote the payload: it
 /// holds credentials and error text ends up on screen and in support bundles.
@@ -53,16 +59,21 @@ sealed class AuroraLink {
   }
 
   static AuroraLink _decode(String encoded) {
-    if (encoded.isEmpty || !_base64UrlPattern.hasMatch(encoded)) {
+    if (encoded.isEmpty ||
+        encoded.length > _maxEncodedLength ||
+        !_base64UrlPattern.hasMatch(encoded)) {
       throw const AuroraLinkException(
         'This link is damaged. Copy the whole line again.',
       );
     }
     final Object? decoded;
     try {
-      decoded = json.decode(
-        utf8.decode(base64Url.decode(base64.normalize(encoded))),
-      );
+      List<int> bytes = base64Url.decode(base64.normalize(encoded));
+      // JSON can only start with an ASCII character, so the gzip magic is unambiguous.
+      if (bytes.length > 1 && bytes[0] == 0x1f && bytes[1] == 0x8b) {
+        bytes = gzip.decode(bytes);
+      }
+      decoded = json.decode(utf8.decode(bytes));
     } catch (_) {
       throw const AuroraLinkException(
         'This link is damaged. Copy the whole line again.',

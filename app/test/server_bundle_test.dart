@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show gzip;
 
 import 'package:aurora/core/config_compiler.dart';
 import 'package:aurora/core/contract.dart';
@@ -61,6 +62,31 @@ String _plan(String? current, String text) =>
 
 void main() {
   group('AuroraLink.parse', () {
+    test('reads the gzip-compressed form that install.sh prints', () {
+      final bundle = _bundle();
+      final encoded = base64Url
+          .encode(gzip.encode(utf8.encode(json.encode(bundle))))
+          .replaceAll('=', '');
+      final parsed = AuroraLink.parse('aurora://v1/$encoded#tokyo');
+      expect((parsed as ServerBundle).name, bundle['name']);
+    });
+
+    test('refuses a link no real server could produce', () {
+      expect(
+        () => AuroraLink.parse('aurora://v1/${'A' * 5000}'),
+        throwsA(isA<AuroraLinkException>()),
+      );
+    });
+
+    test('calls damaged gzip damaged', () {
+      final bytes = gzip.encode(utf8.encode('{"v":1}')).sublist(0, 12);
+      final encoded = base64Url.encode(bytes).replaceAll('=', '');
+      expect(
+        () => AuroraLink.parse('aurora://v1/$encoded'),
+        throwsA(isA<AuroraLinkException>()),
+      );
+    });
+
     test('reads a link as install.sh writes it', () {
       final link = AuroraLink.parse(_link(_bundle())) as ServerBundle;
       expect(link.name, 'tokyo');

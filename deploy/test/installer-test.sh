@@ -70,7 +70,7 @@ decode_link() {
   value="$(printf '%s' "$value" | tr -- '-_' '+/')"
   pad=$(((4 - ${#value} % 4) % 4))
   while ((pad > 0)); do value="$value="; pad=$((pad - 1)); done
-  printf '%s' "$value" | openssl enc -base64 -d -A
+  printf '%s' "$value" | openssl enc -base64 -d -A | gzip -dc
 }
 
 json_has() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); [d.__getitem__(k) for k in sys.argv[2:]]' "$@" >/dev/null 2>&1; }
@@ -131,6 +131,9 @@ etc="$(etc_of "$VPS_PREFIX")"
 link="$(cat "$etc/link.txt")"
 json="$(decode_link "$link")"
 check "link is a v1 aurora link named after the node" '[[ "$link" == aurora://v1/*#tokyo ]]'
+# 520 bytes is the most a version 15 QR code holds at level L: 77 modules plus a margin of
+# one on each side is 79 columns. One version up no longer fits an 80-column terminal.
+check "link fits a QR code on an 80-column terminal" '((${#link} <= 520))'
 check "link stays short enough for a terminal QR code" '[[ ${#link} -lt 800 ]]'
 check "bundle carries every protocol" 'json_has "$json" reality hy2 ss host name kind v'
 check "bundle uses the requested address" '[[ "$json" == *"\"host\":\"203.0.113.10\""* ]]'

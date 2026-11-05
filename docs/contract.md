@@ -13,10 +13,12 @@ The app expands links into contract nodes in `app/lib/core/server_bundle.dart` a
 ## The link
 
 ```
-aurora://v1/<base64url without padding, of compact JSON>#<name>
+aurora://v1/<base64url without padding, of gzip-compressed compact JSON>#<name>
 ```
 
 The `#name` fragment is cosmetic, so a link is recognizable at a glance. The name inside the payload is authoritative.
+Compression is what lets the QR code of a VPS or home link fit an 80-column terminal. The app and `install.sh relay` also
+accept uncompressed JSON, which is convenient when writing a link by hand.
 
 ### Server link
 

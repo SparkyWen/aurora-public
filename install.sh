@@ -299,7 +299,7 @@ pkg_install() {
 
 ensure_prereqs() {
   local missing=() tool
-  for tool in curl tar openssl; do
+  for tool in curl tar gzip openssl; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
   done
   if ((${#missing[@]} > 0)); then
@@ -1128,7 +1128,9 @@ bundle_json() {
 
 write_link_files() {
   local link ss_userinfo tmp
-  link="aurora://v1/$(bundle_json | base64url)#$S_NAME"
+  # Compressed because the QR code has to fit an 80-column terminal, where a code one
+  # module too wide wraps into something no camera can read.
+  link="aurora://v1/$(bundle_json | gzip -9 -n -c | base64url)#$S_NAME"
   tmp="$(mktemp "$LINK_FILE.XXXXXX")"
   printf '%s\n' "$link" >"$tmp"
   chmod 600 "$tmp"
@@ -1163,9 +1165,16 @@ print_link() {
   say "$link"
   say ""
   if command -v qrencode >/dev/null 2>&1; then
-    # Half-block rendering needs the width of the QR plus its margin.
     qrencode -t ANSIUTF8 -m 1 "$link" 2>/dev/null || true
     say ""
+    # A code wider than the terminal wraps and looks almost right, but no camera can
+    # read it. The ASCII form spends two characters per module.
+    local width columns
+    width=$(($(qrencode -t ASCII -m 1 "$link" 2>/dev/null | sed -n 1p | wc -c) / 2))
+    columns="$(tput cols 2>/dev/null || printf 0)"
+    if [[ -t 1 && "$columns" -gt 0 && "$columns" -lt "$width" ]]; then
+      warn "This QR code needs $width columns and your terminal has $columns. Widen the window, then run: sudo aurora-node link"
+    fi
   else
     say "(Install qrencode to also get a QR code here: aurora-node link)"
   fi
@@ -1379,7 +1388,9 @@ parse_relay_link() {
   [[ "$link" == aurora://v1/* ]] || die "expected an aurora://v1/... link from the home node"
   encoded="${link#aurora://v1/}"
   encoded="${encoded%%#*}"
-  json="$(base64url_decode "$encoded" || true)"
+  # `gzip -dc` fails on anything damaged or uncompressed, which falls through to plain JSON.
+  json="$(base64url_decode "$encoded" | gzip -dc 2>/dev/null || true)"
+  [[ -n "$json" ]] || json="$(base64url_decode "$encoded" || true)"
   [[ -n "$json" ]] || die "that link could not be decoded. Copy the whole line from the home node."
   case "$json" in
     *'"kind":"relay"'*) die "that is a relay's link. Use the link printed by the home node." ;;
