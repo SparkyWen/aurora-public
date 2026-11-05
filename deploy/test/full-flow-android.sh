@@ -29,8 +29,8 @@ fail() { FAIL=$((FAIL + 1)); printf 'FAIL %s\n' "$1"; }
 shot() { adb exec-out screencap -p >"$OUT/$1.png"; }
 
 dump_ui() {
-  local attempt
-  for attempt in 1 2 3 4 5; do
+  local _
+  for _ in 1 2 3 4 5; do
     if adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1; then
       return 0
     fi
@@ -95,7 +95,7 @@ sentinel_reachable() { fetch "http://$SENTINEL/sentinel.txt" | grep -q 'came thr
 sentinel_unreachable() { ! sentinel_reachable; }
 
 sentinel_within() {
-  local seconds="$1" deadline=$((SECONDS + $1))
+  local deadline=$((SECONDS + $1))
   while ((SECONDS < deadline)); do
     sentinel_reachable && return 0
     sleep 2

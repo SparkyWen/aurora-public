@@ -175,8 +175,8 @@ client_install() {
   add_namespace client "$CLIENT_IP"
   service_in_namespace aurora-svc client
   systemctl restart aurora-svc
-  local attempt
-  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  local _
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     ip netns exec client ss -ltn 2>/dev/null | grep -q 53421 && break
     sleep 1
   done
@@ -242,8 +242,8 @@ connect_and_prove() {
 disconnect_and_prove() {
   local label="$1"
   aurora disconnect >"$OUT/disconnect-$label.log" 2>&1
-  local attempt
-  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  local _
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     tunnel_gone && break
     sleep 1
   done
@@ -792,8 +792,8 @@ EOF
 
   (cd "$ROOT/control-plane" && nohup wrangler dev --local --ip "$GATEWAY" --port 8787 \
     --var "DELIVERY_DOMAINS:[\"https://$domain\"]" >"$OUT/wrangler.log" 2>&1 &)
-  local attempt
-  for attempt in $(seq 1 30); do
+  local _
+  for _ in $(seq 1 30); do
     curl -fsS --max-time 2 "http://$GATEWAY:8787/health" >/dev/null 2>&1 && break
     sleep 2
   done
