@@ -1,0 +1,346 @@
+# The whole user journey against packages a release would ship: the README's install command
+# from the public URL, then the real client on each platform connecting through a real tunnel.
+# See deploy/test/full-flow-*.
+#
+# Run it by hand on the id of a `release` workflow run, whose artifacts are what gets tested:
+#   gh workflow run full-flow -f packages_run=<run id>
+name: full-flow
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages_run:
+        description: Run id of a `release` workflow run to take the packages from
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  PACKAGES_RUN: ${{ inputs.packages_run }}
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.scenario }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [vps, home, gui, delivery]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-package
+          path: packages
+          run-id: ${{ env.PACKAGES_RUN }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@v4
+        if: matrix.scenario == 'delivery'
+        with:
+          node-version: 22
+      - uses: subosito/flutter-action@v2
+        if: matrix.scenario == 'delivery'
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+      - name: What publishing needs
+        if: matrix.scenario == 'delivery'
+        run: |
+          npm install -g wrangler@4
+          (cd app && flutter pub get)
+      - name: The journey
+        run: |
+          deb="$(find "$PWD/packages" -name '*.deb' | head -n 1)"
+          sudo env "PATH=$PATH" "PUB_CACHE=${PUB_CACHE:-}" FULL_FLOW_OUT="$RUNNER_TEMP/full-flow" \
+            bash deploy/test/full-flow-linux.sh ${{ matrix.scenario }} "$deb"
+      - name: What the services said
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/full-flow"
+          sudo journalctl -u aurora-svc -n 200 --no-pager | sudo tee "$RUNNER_TEMP/full-flow/journal-aurora-svc.log" >/dev/null || true
+          sudo journalctl -u aurora-node -n 200 --no-pager | sudo tee "$RUNNER_TEMP/full-flow/journal-aurora-node.log" >/dev/null || true
+          sudo cp -r /var/lib/aurora/logs "$RUNNER_TEMP/full-flow/aurora-logs" 2>/dev/null || true
+          sudo chmod -R a+rX "$RUNNER_TEMP/full-flow"
+          # The journey runs as root, and later steps of the actions used must read the checkout.
+          sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-flow-linux-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/full-flow
+          retention-days: 7
+
+  android:
+    name: Android emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: README command on this machine
+        run: |
+          set -o pipefail
+          curl -fsSL https://raw.githubusercontent.com/SparkyWen/aurora-public/main/install.sh | sudo bash | tee install.log
+          grep -Eo 'aurora://v1/[A-Za-z0-9_-]+#[a-z0-9-]+' install.log | head -n 1 > link.txt
+          curl -fsS4 https://api.ipify.org > public-ip.txt
+      - name: A page only the node can reach, and the node's address made local
+        run: |
+          sentinel=203.0.113.9
+          echo "SENTINEL=$sentinel" >> "$GITHUB_ENV"
+          # The emulator's sockets are this machine's sockets. Without this it could not dial the
+          # machine's own public address, which a runner does not route back to itself.
+          sudo ip addr add "$(cat public-ip.txt)/32" dev lo
+          sudo ip addr add "$sentinel/32" dev lo
+          mkdir -p sentinel && echo 'came through the node' > sentinel/sentinel.txt
+          (cd sentinel && sudo nohup python3 -m http.server 80 --bind "$sentinel" >/dev/null 2>&1 &)
+          sudo iptables -I OUTPUT 1 -d "$sentinel" -m owner --uid-owner aurora-node -j ACCEPT
+          sudo iptables -I OUTPUT 2 -d "$sentinel" -m owner --uid-owner 0 -j ACCEPT
+          sudo iptables -I OUTPUT 3 -d "$sentinel" -j REJECT
+      - name: Enable KVM
+        run: |
+          sudo apt-get install -y -qq busybox-static
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+      # The release APK is arm64 only and an emulator here is x86-64, so this builds the same
+      # source for x86-64. Everything else matches the release build.
+      - name: Restore libbox for x86-64
+        id: libbox
+        uses: actions/cache@v4
+        with:
+          path: app/android/app/libs/libbox.aar
+          key: libbox-amd64-gomobile-v0.1.12-${{ hashFiles('core/**') }}
+      - name: Build libbox for x86-64
+        if: steps.libbox.outputs.cache-hit != 'true'
+        run: |
+          echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" >/dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+          go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          gomobile init
+          go install github.com/sagernet/gomobile/cmd/gobind@v0.1.12
+          mkdir -p app/android/app/libs
+          make -C core android ABIS=android/amd64
+      - name: Build the APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --release --target-platform android-x64
+      - name: The journey
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save
+          script: bash deploy/test/full-flow-android.sh "$PWD/app/build/app/outputs/flutter-apk/app-release.apk" "$(cat link.txt)" "$(cat public-ip.txt)" "$SENTINEL" "$RUNNER_TEMP/full-flow"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-flow-android
+          path: ${{ runner.temp }}/full-flow
+          retention-days: 7
+
+  windows-node:
+    name: Node config for the Windows client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate a node on loopback
+        run: |
+          sb="sing-box-1.13.14-linux-amd64"
+          curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v1.13.14/$sb.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          AURORA_TEST_MODE=1 AURORA_PREFIX="$RUNNER_TEMP/node" AURORA_SING_BOX="$RUNNER_TEMP/$sb/sing-box" \
+            bash install.sh --vps --name winnode --host 127.0.0.1 --no-self-test --reality-sni www.apple.com \
+            --reality-port 24443 --hy2-port 24443 --ss-port 28443 >/dev/null
+          pkill -f "sing-box run -c" || true
+          mkdir -p node
+          for f in sing-box.json link.txt hy2.crt hy2.key; do cp "$RUNNER_TEMP/node/etc/aurora-node/$f" node/; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-node
+          path: node
+          retention-days: 1
+
+  windows:
+    name: Windows
+    needs: windows-node
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-node
+          path: node
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-package
+          path: packages
+          run-id: ${{ env.PACKAGES_RUN }}
+          github-token: ${{ github.token }}
+      - name: The journey
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem packages -Recurse -Filter "*setup.exe" | Select-Object -First 1
+          & deploy/test/full-flow-windows.ps1 -Installer $installer.FullName -NodeDir "$PWD\node" -OutDir "$env:RUNNER_TEMP\full-flow"
+          exit $LASTEXITCODE
+      - name: What the service said
+        if: always()
+        shell: pwsh
+        run: |
+          Copy-Item "$env:ProgramData\Aurora\*.log" "$env:RUNNER_TEMP\full-flow\" -ErrorAction SilentlyContinue
+          Get-ChildItem -Recurse "$env:ProgramData\Aurora" -ErrorAction SilentlyContinue | Select-Object FullName, Length
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-flow-windows
+          path: ${{ runner.temp }}/full-flow
+          retention-days: 7
+
+  macos-node:
+    name: macOS node (launchd)
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: README command, verbatim
+        run: |
+          set -o pipefail
+          curl -fsSL https://raw.githubusercontent.com/SparkyWen/aurora-public/main/install.sh | sudo bash | tee install.log
+      - name: It set itself up properly
+        run: |
+          grep -q 'Detected a home environment' install.log
+          for protocol in reality hy2 ss; do grep -q "$protocol carries traffic" install.log; done
+          grep -Eq 'aurora://v1/[A-Za-z0-9_-]+#[a-z0-9-]+' install.log
+          test -f /Library/LaunchDaemons/org.aurora.node.plist
+          sudo launchctl print system/org.aurora.node | grep -E 'state = running'
+          sudo aurora-node status
+          sudo aurora-node link | grep -q 'aurora://v1/'
+      - name: Survives a service restart
+        run: |
+          sudo launchctl kickstart -k system/org.aurora.node
+          sleep 3
+          sudo launchctl print system/org.aurora.node | grep -E 'state = running'
+          sudo aurora-node verify
+      - name: Rotation replaces the keys and still works
+        run: |
+          before="$(sudo cat /usr/local/etc/aurora-node/link.txt)"
+          sudo aurora-node rotate >/dev/null
+          test "$before" != "$(sudo cat /usr/local/etc/aurora-node/link.txt)"
+          sudo aurora-node verify
+      - name: Uninstall removes everything
+        run: |
+          sudo aurora-node uninstall --purge
+          ! sudo launchctl print system/org.aurora.node
+          test ! -e /usr/local/etc/aurora-node
+          test ! -e /usr/local/bin/aurora-node
+          test ! -e /usr/local/lib/aurora-node
+          test ! -e /Library/LaunchDaemons/org.aurora.node.plist
+
+  apple:
+    name: iOS simulator and the macOS app
+    runs-on: macos-26
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.5.app/Contents/Developer
+      COCOAPODS_DISABLE_STATS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+          cache-dependency-path: core/go.sum
+      - name: Build libbox for iOS, the simulator and macOS
+        working-directory: core
+        run: |
+          go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.12
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          gomobile init
+          go install github.com/sagernet/gomobile/cmd/gobind@v0.1.12
+          # The Makefile's targets have no simulator slice, which only this job needs.
+          gomobile bind -v -target=ios,iossimulator,macos -iosversion=15.0 \
+            -tags=with_gvisor,with_quic,with_utls,with_clash_api -trimpath -buildvcs=false \
+            -o ../app/ios/PacketTunnel/Libbox.xcframework \
+            github.com/sagernet/sing-box/experimental/libbox
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.5
+          channel: stable
+          cache: true
+      - name: Install CocoaPods and resolve
+        working-directory: app
+        run: |
+          gem install cocoapods -v 1.16.2 --no-document --user-install
+          export PATH="$(ruby -e 'print Gem.user_dir')/bin:$PATH"
+          echo "$(ruby -e 'print Gem.user_dir')/bin" >> "$GITHUB_PATH"
+          flutter pub get
+          (cd ios && pod install --repo-update)
+          (cd macos && pod install --repo-update)
+      - name: A link to open
+        run: |
+          sb="sing-box-1.13.14-darwin-arm64"
+          curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v1.13.14/$sb.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          AURORA_TEST_MODE=1 AURORA_PREFIX="$RUNNER_TEMP/node" AURORA_SING_BOX="$RUNNER_TEMP/$sb/sing-box" \
+            bash install.sh --vps --name demo --host 203.0.113.10 --no-self-test --reality-sni www.apple.com \
+            --reality-port 24443 --hy2-port 24443 --ss-port 28443 >/dev/null
+          pkill -f "sing-box run -c" || true
+          cp "$RUNNER_TEMP/node/usr/local/etc/aurora-node/link.txt" link.txt
+      - name: Build for the simulator
+        working-directory: app
+        run: flutter build ios --simulator --debug --no-pub
+      - name: First run and the deep link on an iOS simulator
+        run: |
+          out="$RUNNER_TEMP/full-flow"; mkdir -p "$out"
+          device="$(xcrun simctl list devices available | grep -m1 -E 'iPhone' | sed -E 's/.*\(([0-9A-F-]{36})\).*/\1/')"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b >/dev/null
+          xcrun simctl install "$device" app/build/ios/iphonesimulator/Runner.app
+          xcrun simctl launch "$device" com.aurora.vpn
+          sleep 25
+          xcrun simctl io "$device" screenshot "$out/ios-01-first-run.png"
+          xcrun simctl openurl "$device" "$(cat link.txt)"
+          sleep 12
+          xcrun simctl io "$device" screenshot "$out/ios-02-deep-link.png"
+      - name: Build the macOS app
+        working-directory: app
+        run: |
+          flutter build macos --config-only --release --no-pub
+          cd macos
+          xcodebuild -workspace Runner.xcworkspace -scheme Runner -configuration Release \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
+            -quiet build
+          ls -d build/Build/Products/Release/*.app
+      - name: Open the macOS app
+        run: |
+          out="$RUNNER_TEMP/full-flow"
+          app="$(ls -d app/macos/build/Build/Products/Release/*.app | head -n 1)"
+          "$app/Contents/MacOS/$(basename "$app" .app)" >"$out/macos-stdout.log" 2>&1 &
+          sleep 25
+          screencapture -x "$out/macos-01-first-run.png" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-flow-apple
+          path: ${{ runner.temp }}/full-flow
+          retention-days: 7
