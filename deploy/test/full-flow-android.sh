@@ -65,7 +65,7 @@ see() {
 }
 
 wait_for() {
-  local label="$1" seconds="${2:-30}" deadline=$((SECONDS + ${2:-30}))
+  local label="$1" deadline=$((SECONDS + ${2:-30}))
   while ((SECONDS < deadline)); do
     see "$label" && return 0
     sleep 1

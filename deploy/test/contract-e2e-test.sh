@@ -137,7 +137,9 @@ PY
   actual=""
   for _ in 1 2 3; do
     actual="$(curl -fsS4 --max-time 15 --proxy "socks5h://127.0.0.1:$port" https://api.ipify.org 2>/dev/null || true)"
-    [[ -n "$actual" ]] && break
+    # Runners can leave through more than one address, so only a request that never comes out
+    # of the expected one is a wrong exit.
+    [[ "$actual" == "$EXPECTED" ]] && break
     sleep 1
   done
   if [[ "$actual" == "$EXPECTED" ]]; then

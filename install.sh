@@ -1302,7 +1302,17 @@ EOF
       hy2) target_tag="$p_hy2" ;;
       ss) target_tag="$p_ss" ;;
     esac
-    if egress="$(fetch_ip_via "$target_tag")"; then
+    # Some networks leave through several addresses (a NAT pool, more than one WAN), so one
+    # answer from another address does not yet mean the wrong exit.
+    egress=""
+    for _ in 1 2 3; do
+      if ! egress="$(fetch_ip_via "$target_tag")"; then
+        egress=""
+        break
+      fi
+      if [[ -z "$expected" || "$egress" == "$expected" ]]; then break; fi
+    done
+    if [[ -n "$egress" ]]; then
       if [[ -n "$expected" && "$egress" != "$expected" ]]; then
         warn "$name works, but traffic exits from $egress instead of $expected"
         failures=$((failures + 1))
