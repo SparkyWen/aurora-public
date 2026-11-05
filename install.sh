@@ -986,11 +986,12 @@ def main(argv):
         return 3
     control, kind = found
     if argv[0] == "external-ip":
+        # Common router firmware (miniupnpd) answers with an empty address or an error rather
+        # than name a private WAN address, so "there is a router and it will not say" means
+        # something, and is not the same as finding no router.
         try:
-            print(external_ip(control, kind))
+            print(external_ip(control, kind) or "unknown")
         except Exception:
-            # Common router firmware (miniupnpd) answers with an error rather than name a
-            # private WAN address, so "there is a router and it will not say" means something.
             print("unknown")
         return 0
     if argv[0] == "map":
