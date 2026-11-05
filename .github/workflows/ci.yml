@@ -94,8 +94,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install as the README says
         run: |
-          # stdin, as under `curl | sudo bash`, so the truncation guard and self-install paths are exercised.
-          sudo bash -s -- --vps --name ci < install.sh
+          # No flags and over stdin, exactly as under `curl | sudo bash`. Detection must find a
+          # cloud machine by itself: an install that needs a flag here is a broken README.
+          set -o pipefail
+          sudo bash < install.sh | tee install.log
+          grep -q 'Detected a vps environment' install.log
       - name: The service runs as an unprivileged, sandboxed user
         run: |
           systemctl is-active aurora-node

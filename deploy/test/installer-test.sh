@@ -80,6 +80,18 @@ vps_ports=(--reality-port "$base_port" --hy2-port "$((base_port + 1))" --ss-port
 home_ports=(--reality-port "$((base_port + 10))" --hy2-port "$((base_port + 11))" --ss-port "$((base_port + 12))")
 relay_ports=(--reality-port "$((base_port + 20))" --hy2-port "$((base_port + 21))" --ss-port "$((base_port + 22))")
 
+echo "--- the README's command: no arguments at all"
+# A sing-box path that cannot run stops the install right after it has made its decisions,
+# so nothing binds a port. What this guards: with no arguments the script used to exit 1
+# without printing a word, and every other test passes flags, so nothing noticed.
+bare_install() {
+  AURORA_TEST_MODE=1 AURORA_PREFIX="$WORK/bare" AURORA_SING_BOX=/nonexistent AURORA_PUBLIC_IP=203.0.113.7 "$@" 2>&1 || true
+}
+out="$(bare_install bash "$ROOT/install.sh")"
+check "no arguments starts an install" '[[ "$out" == *"Detected a"* ]]'
+out="$(bare_install bash <"$ROOT/install.sh")"
+check "no arguments over stdin, as under curl | bash, starts an install" '[[ "$out" == *"Detected a"* ]]'
+
 echo "--- input validation"
 out="$(node "$WORK/bad" --vps --name 'Bad Name' 2>&1 || true)"
 check "rejects an invalid node name" '[[ "$out" == *"invalid --name"* ]]'

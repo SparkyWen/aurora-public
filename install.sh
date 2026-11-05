@@ -1764,7 +1764,11 @@ cmd_uninstall() {
 
 main() {
   init_paths
-  local command="${1:-install}"
+  # No arguments means a plain install, the command in the README. Normalise it here
+  # because `shift` with nothing to shift fails, and under `set -e` that ends the
+  # script silently.
+  if [[ $# -eq 0 ]]; then set -- install; fi
+  local command="$1"
   case "$command" in
     -h | --help | help) usage; exit 0 ;;
     version | --version) say "aurora-node $AURORA_NODE_VERSION (sing-box $SING_BOX_VERSION)"; exit 0 ;;
