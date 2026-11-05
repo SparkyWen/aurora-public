@@ -1054,6 +1054,13 @@ ddns_duckdns() {
   [[ "$answer" == OK* ]]
 }
 
+# The first object in a Cloudflare result is what was asked for, and an empty result or an
+# error holds no "id" at all. There is no JSON parser to rely on here, and the order of fields
+# in the API's answers is not documented, so this does not assume "id" comes first.
+first_json_id() {
+  grep -Eo '"id" *: *"[a-f0-9]+"' | sed -n '1s/.*"\([a-f0-9]*\)"$/\1/p'
+}
+
 # Walks up the DNS name to find the zone, then creates or updates the A record.
 # The record is never proxied: clients need the real address for REALITY and QUIC.
 ddns_cloudflare() {
@@ -1062,13 +1069,13 @@ ddns_cloudflare() {
   candidate="$S_HOST"
   while [[ "$candidate" == *.* ]]; do
     answer="$(curl -fsS --max-time 15 -H "$auth" "$api/zones?name=$candidate" 2>/dev/null || true)"
-    zone="$(printf '%s' "$answer" | sed -n 's/.*"result":\[{"id":"\([a-f0-9]*\)".*/\1/p')"
+    zone="$(printf '%s' "$answer" | first_json_id)"
     [[ -n "$zone" ]] && break
     candidate="${candidate#*.}"
   done
   [[ -n "$zone" ]] || return 1
   answer="$(curl -fsS --max-time 15 -H "$auth" "$api/zones/$zone/dns_records?type=A&name=$S_HOST" 2>/dev/null || true)"
-  record="$(printf '%s' "$answer" | sed -n 's/.*"result":\[{"id":"\([a-f0-9]*\)".*/\1/p')"
+  record="$(printf '%s' "$answer" | first_json_id)"
   local body="{\"type\":\"A\",\"name\":\"$S_HOST\",\"content\":\"$ip\",\"ttl\":60,\"proxied\":false}"
   if [[ -n "$record" ]]; then
     curl -fsS --max-time 15 -X PUT -H "$auth" -H 'Content-Type: application/json' \
