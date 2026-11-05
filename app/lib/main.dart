@@ -72,6 +72,16 @@ Future<void> main() async {
 class AuroraApp extends StatelessWidget {
   const AuroraApp({super.key});
 
+  static Route<void> _homeRoute() => MaterialPageRoute<void>(
+    settings: const RouteSettings(name: Navigator.defaultRouteName),
+    builder: (_) => const ConnectPage(),
+  );
+
+  static Route<bool> _linkRoute(String name) => MaterialPageRoute<bool>(
+    settings: RouteSettings(name: name),
+    builder: (_) => AddServerPage(deepLinkRoute: name),
+  );
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -80,18 +90,20 @@ class AuroraApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const ConnectPage(),
-      // The Flutter engine turns `aurora://v1/<data>#<name>` (a scanned QR code)
-      // into a pushed route named `/<data>#<name>`, so deep links need no native
-      // code. `/` is the home page; anything else can only be such a link, and a
-      // malformed one lands on a page that says so rather than crashing the app.
+      // At a cold start the link is the initial route, and with no home underneath it the
+      // page's pop after adding the server would leave nothing on screen.
+      onGenerateInitialRoutes: (initialRoute) => [
+        _homeRoute(),
+        if (initialRoute != Navigator.defaultRouteName) _linkRoute(initialRoute),
+      ],
+      // To a running app, the Flutter engine delivers `aurora://v1/<data>#<name>` (a scanned
+      // QR code) as a pushed route named `/<data>#<name>`, so deep links need no native code.
+      // `/` is the home page; anything else can only be such a link, and a malformed one
+      // lands on a page that says so rather than crashing the app.
       onGenerateRoute: (settings) {
         final name = settings.name;
-        if (name == null || name == '/') return null;
-        return MaterialPageRoute<bool>(
-          settings: settings,
-          builder: (_) => AddServerPage(deepLinkRoute: name),
-        );
+        if (name == null) return null;
+        return name == Navigator.defaultRouteName ? _homeRoute() : _linkRoute(name);
       },
     );
   }

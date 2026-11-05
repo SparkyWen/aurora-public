@@ -71,10 +71,7 @@ class _AddServerPageState extends State<AddServerPage> {
   Future<void> _addPending() async {
     final route = widget.deepLinkRoute;
     if (route == null) return;
-    final path = route.split('#').first;
-    await _import(
-      '$auroraLinkPrefix${path.startsWith('/') ? path.substring(1) : path}',
-    );
+    await _import(AuroraLink.linkFromRoute(route));
   }
 
   Future<void> _import(String text) async {

@@ -51,11 +51,17 @@ sealed class AuroraLink {
     return _decode(trimmed.substring(auroraLinkPrefix.length).split('#').first);
   }
 
-  /// Parses what the Flutter engine delivers for a deep link: `aurora://v1/<data>`
-  /// arrives as the route `/<data>#<name>` because the scheme and host are dropped.
-  static AuroraLink parseRoute(String routeName) {
-    final path = routeName.split('#').first.split('?').first;
-    return _decode(path.startsWith('/') ? path.substring(1) : path);
+  /// Parses what the Flutter engine delivers for a deep link.
+  static AuroraLink parseRoute(String routeName) => parse(linkFromRoute(routeName));
+
+  /// Turns a route back into the link it came from. The engine delivers one link in two
+  /// shapes: to a running app as the route `/<data>#<name>`, with the scheme and host
+  /// dropped, and at a cold start, which is what scanning a QR code usually is, as the
+  /// whole `aurora://v1/<data>#<name>`.
+  static String linkFromRoute(String routeName) {
+    final withoutFragment = routeName.split('#').first.split('?').first;
+    if (withoutFragment.startsWith(auroraLinkPrefix)) return withoutFragment;
+    return '$auroraLinkPrefix${withoutFragment.startsWith('/') ? withoutFragment.substring(1) : withoutFragment}';
   }
 
   static AuroraLink _decode(String encoded) {

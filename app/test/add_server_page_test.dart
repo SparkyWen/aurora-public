@@ -1,7 +1,9 @@
 import 'dart:convert';
 
+import 'package:aurora/core/server_bundle.dart';
 import 'package:aurora/data/contract_repository.dart';
 import 'package:aurora/data/secure_store.dart';
+import 'package:aurora/features/connect/connect_page.dart';
 import 'package:aurora/features/servers/add_server_page.dart';
 import 'package:aurora/main.dart';
 import 'package:flutter/material.dart';
@@ -160,5 +162,48 @@ void main() {
 
     expect(find.text('Add this server?'), findsOneWidget);
     expect(await SecureStore.loadContract(), isNull);
+  });
+
+  // Scanning a QR code usually starts the app. The link then arrives as the initial route,
+  // whole and with nothing underneath it, which a pushed route never shows.
+  testWidgets('a deep link that starts the app can be confirmed and leads home', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    tester.binding.platformDispatcher.defaultRouteNameTestValue = _link('tokyo');
+    addTearDown(tester.binding.platformDispatcher.clearDefaultRouteNameTestValue);
+
+    await tester.pumpWidget(const AuroraApp());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('Add this server?'), findsOneWidget);
+    expect(find.textContaining('damaged'), findsNothing);
+    expect(await SecureStore.loadContract(), isNull);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(FilledButton, 'Add server').first);
+      await tester.pump();
+      for (var i = 0; i < 20 && await SecureStore.loadContract() == null; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(await SecureStore.loadContract(), isNotNull);
+    expect(find.byType(ConnectPage), findsOneWidget);
+    expect(find.text('Add this server?'), findsNothing);
+  });
+
+  test('both shapes of a delivered route are the same link', () {
+    final link = _link('tokyo');
+    final bare = link.split('#').first;
+    expect(AuroraLink.linkFromRoute(link), bare);
+    expect(AuroraLink.linkFromRoute(routeOf(link)), bare);
+    expect(AuroraLink.parseRoute(link), isA<ServerBundle>());
+    expect(AuroraLink.parseRoute(routeOf(link)), isA<ServerBundle>());
   });
 }
