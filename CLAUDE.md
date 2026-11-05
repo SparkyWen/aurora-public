@@ -24,8 +24,10 @@ or platform service: most of the code that looks over-careful exists because of 
   `sing-box check`.
 - Do not run `dart format` across files you did not otherwise change: the sources are not format-clean.
 - `install.sh` is one file, compatible with bash 3.2, and all logic stays inside functions.
-- Run `install.sh` only through `deploy/test/*`, unless the user explicitly asks you to install a node. It
-  changes system services and firewalls.
+- Run `install.sh` only through `deploy/test/installer-test.sh` and `contract-e2e-test.sh`, unless the user
+  explicitly asks you to install a node. It changes system services and firewalls. `deploy/test/full-flow-*`
+  are worse: they reconfigure the whole machine and only belong on the throwaway runners of the `full-flow`
+  workflow.
 
 ## Commands
 

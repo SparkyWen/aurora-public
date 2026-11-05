@@ -26,6 +26,7 @@ Thanks for helping. Please read this first: most of it exists because something 
 | Control plane | `cd control-plane && node --test` |
 | Edge agents | `cd edge-agent && go test ./...` |
 | Repository policy | `bash scripts/check-repo-policy.sh` |
+| The whole user journey, on every platform | `gh workflow run full-flow -f packages_run=<id of a release run>` |
 
 The installer tests need no root and never touch services, firewalls or your router, so they are
 safe on a machine that is already a production node. They run real sing-box instances on high

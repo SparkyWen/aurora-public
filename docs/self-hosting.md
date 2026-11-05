@@ -103,6 +103,10 @@ curl -fsSL .../install.sh | sudo --preserve-env=AURORA_CF_TOKEN bash -s -- --hom
 Tokens are stored in the node's `0600` state file. A timer checks every five minutes. The Cloudflare record is never
 proxied, because clients need your real address for REALITY and QUIC.
 
+Before the tunnel exists, the app looks server names up directly at `223.5.5.5`, a public resolver that also answers
+reliably from inside China. If your network blocks it, a server known only by name cannot be reached. Use its IP
+address with `--host` instead.
+
 ### Testing a home node
 
 **Test from outside your home**, for example from a phone on mobile data. Testing your own public IP from inside the

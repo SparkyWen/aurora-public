@@ -552,6 +552,14 @@ convenience for networks where other delivery channels are slow or blocked, not 
   takes the printed links through the app's own compiler and tests every exit the same way. CI also
   runs a real install, as root under systemd, on a clean Ubuntu machine. `scripts/test/` exercises
   the verification scripts.
-- **Not covered by tests**: behaviour that exists only on real devices (wintun adapter lifecycle,
-  carrier throttling, captive portals). The reliability notes record what was observed and how to
-  re-check it.
+- **The whole journey**: the `full-flow` workflow takes the packages of a `release` run through what
+  a user does. The README's command from the public URL, then the real client through a real tunnel:
+  the `.deb` and the Linux window, the Windows installer and window, the app on an Android emulator
+  from a deep link. A home node sits behind a real UPnP router (miniupnpd), a relay in front of it,
+  and the client is firewalled so that traffic can only have crossed the tunnel. All of it runs inside
+  one runner with network namespaces, because runners accept no inbound traffic, so it does not prove
+  anything about real networks. Cloudflare and DuckDNS are stand-ins, and the Worker runs locally.
+- **Not covered by tests**: behaviour that exists only on real devices and networks (a phone camera
+  handing over a QR code, real routers, carrier throttling, captive portals). The tunnel on iOS and
+  macOS needs a signed build, so CI only checks that those apps build and open. The reliability notes
+  record what was observed and how to re-check it.
